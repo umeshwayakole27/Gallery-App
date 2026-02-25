@@ -9,10 +9,9 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.border
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -150,6 +149,7 @@ fun GalleryGridScreen(
     val scrollSpeed = remember { mutableFloatStateOf(0f) }
     val isDragSelecting = remember { mutableStateOf(false) }
     val localDensity = LocalDensity.current
+    val haptic = LocalHapticFeedback.current
 
     // Auto-scroll coroutine: continuously scrolls when drag is near viewport edges
     LaunchedEffect(scrollSpeed.floatValue) {
@@ -253,20 +253,15 @@ fun GalleryGridScreen(
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                     modifier = Modifier
                         .fillMaxSize()
-                        .then(
-                            // Apply drag-to-select when in selection mode or always
-                            // (drag starts selection if not already selecting)
-                            if (isSelecting) {
-                                Modifier.dragSelectionHandler(
-                                    state = gridState,
-                                    selectedItemsList = selectedItemsList,
-                                    allItems = images,
-                                    scrollSpeed = scrollSpeed,
-                                    scrollThreshold = with(localDensity) { 40.dp.toPx() },
-                                    isDragSelecting = isDragSelecting
-                                )
-                            } else {
-                                Modifier
+                        .dragSelectionHandler(
+                            state = gridState,
+                            selectedItemsList = selectedItemsList,
+                            allItems = images,
+                            scrollSpeed = scrollSpeed,
+                            scrollThreshold = with(localDensity) { 40.dp.toPx() },
+                            isDragSelecting = isDragSelecting,
+                            onDragSelectStart = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             }
                         )
                 ) {
@@ -287,13 +282,6 @@ fun GalleryGridScreen(
                                     selectedItemsList.toggleItem(image)
                                 } else {
                                     onImageClick(image.id)
-                                }
-                            },
-                            onLongPress = {
-                                if (isItemSelected) {
-                                    selectedItemsList.unselectItem(image)
-                                } else {
-                                    selectedItemsList.selectItem(image)
                                 }
                             }
                         )
@@ -324,7 +312,8 @@ fun GalleryGridScreen(
  * A single image card in the gallery grid with selection support.
  *
  * Adapted from Tulsi's MediaStoreItem:
- * - Long-press to start/toggle selection (with haptic feedback)
+ * - Long-press to start/toggle selection is handled by the grid-level
+ *   [dragSelectionHandler] (which uses [detectDragGesturesAfterLongPress])
  * - Tap to navigate (normal mode) or toggle selection (selection mode)
  * - Scale animation: shrinks to 0.85x when selected
  * - Primary-colored border on selected items
@@ -334,19 +323,14 @@ fun GalleryGridScreen(
  * @param isSelected Whether this item is currently selected
  * @param isSelectionMode Whether we're in multi-select mode
  * @param onTap Callback for single tap
- * @param onLongPress Callback for long press
  */
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SelectableImageGridItem(
     image: MediaItem,
     isSelected: Boolean,
     isSelectionMode: Boolean,
-    onTap: () -> Unit,
-    onLongPress: () -> Unit
+    onTap: () -> Unit
 ) {
-    val haptic = LocalHapticFeedback.current
-
     // Animated scale: 0.85 when selected, 1.0 when not (adapted from Tulsi's 0.8)
     val scale by animateFloatAsState(
         targetValue = if (isSelected) 0.85f else 1f,
@@ -373,13 +357,7 @@ private fun SelectableImageGridItem(
                         )
                     } else Modifier
                 )
-                .combinedClickable(
-                    onClick = onTap,
-                    onLongClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onLongPress()
-                    }
-                ),
+                .clickable(onClick = onTap),
             shape = MaterialTheme.shapes.small,
             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
         ) {
@@ -419,12 +397,16 @@ private fun SelectableImageGridItem(
 // by dragging across the LazyVerticalGrid. Auto-scrolls near viewport edges.
 
 /**
- * Modifier that enables drag-to-select on a [LazyVerticalGrid].
+ * Modifier that enables long-press-and-drag to select on a [LazyVerticalGrid].
  *
- * When the user drags across the grid while in selection mode, items between
- * the drag start and the current position are selected (or deselected, depending
- * on the initial item's state). The grid auto-scrolls when the drag reaches
- * near the top or bottom edges.
+ * A long press on any item enters selection mode and begins drag-to-select.
+ * Dragging across the grid selects (or deselects) all items between the
+ * initial long-press position and the current drag position. The grid
+ * auto-scrolls when the drag reaches near the top or bottom edges.
+ *
+ * Uses [detectDragGesturesAfterLongPress] so the initial long-press + drag
+ * is handled as a single continuous gesture, allowing multi-select on the
+ * very first interaction without requiring a second gesture.
  *
  * Adapted from Tulsi Gallery's `dragSelectionHandler()`.
  *
@@ -434,6 +416,7 @@ private fun SelectableImageGridItem(
  * @param scrollSpeed Mutable float state controlling auto-scroll speed
  * @param scrollThreshold Distance in pixels from viewport edge to trigger auto-scroll
  * @param isDragSelecting Mutable state tracking whether a drag-select is in progress
+ * @param onDragSelectStart Callback invoked when a drag-select begins (for haptic feedback)
  */
 private fun Modifier.dragSelectionHandler(
     state: LazyGridState,
@@ -441,7 +424,8 @@ private fun Modifier.dragSelectionHandler(
     allItems: List<MediaItem>,
     scrollSpeed: MutableFloatState,
     scrollThreshold: Float,
-    isDragSelecting: MutableState<Boolean>
+    isDragSelecting: MutableState<Boolean>,
+    onDragSelectStart: () -> Unit = {}
 ) = pointerInput(allItems) {
     if (allItems.isEmpty()) return@pointerInput
 
@@ -455,9 +439,10 @@ private fun Modifier.dragSelectionHandler(
         (state.layoutInfo.viewportSize.width / it).coerceAtLeast(1)
     } ?: 3
 
-    detectDragGestures(
+    detectDragGesturesAfterLongPress(
         onDragStart = { offset ->
             isDragSelecting.value = true
+            onDragSelectStart()
             val idx = state.getGridItemIndex(offset, allItems, numberOfColumns)
             if (idx != null && idx < allItems.size) {
                 val item = allItems[idx]
