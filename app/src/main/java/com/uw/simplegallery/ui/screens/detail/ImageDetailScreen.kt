@@ -126,6 +126,16 @@ fun ImageDetailScreen(
             }
     }
 
+    // Navigate back if the current media item was deleted (e.g., after API 30+ system dialog approval
+    // or direct MANAGE_MEDIA deletion). When the media list refreshes after deletion, the item is
+    // removed from the list. If the list becomes empty or the originally viewed item is no longer
+    // present, we navigate back so the user isn't stuck on a stale/empty detail screen.
+    LaunchedEffect(imageList) {
+        if (imageList.isEmpty() || imageList.none { it.id == imageId }) {
+            onNavigateBack()
+        }
+    }
+
     // UI state
     var showBars by remember { mutableStateOf(true) }
     var showDeleteDialog by remember { mutableStateOf(false) }
@@ -242,7 +252,9 @@ fun ImageDetailScreen(
                     }
 
                     // Delete button
-                    IconButton(onClick = { showDeleteDialog = true }) {
+                    IconButton(onClick = {
+                        showDeleteDialog = true
+                    }) {
                         Icon(
                             imageVector = Icons.Default.Delete,
                             contentDescription = "Delete image",
@@ -263,7 +275,9 @@ fun ImageDetailScreen(
         }
     }
 
-    // Delete confirmation dialog
+    // Delete confirmation dialog — shown on ALL API levels.
+    // On API 30+ with MANAGE_MEDIA, the system's createDeleteRequest auto-approves,
+    // so this custom dialog is the user's only chance to cancel.
     if (showDeleteDialog && currentMedia != null) {
         AlertDialog(
             onDismissRequest = { showDeleteDialog = false },
@@ -277,9 +291,13 @@ fun ImageDetailScreen(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        viewModel.deleteMedia(currentMedia.id)
                         showDeleteDialog = false
-                        onNavigateBack()
+                        viewModel.deleteMedia(currentMedia.id)
+                        // On API < 30, deletion is direct — navigate back immediately.
+                        // On API 30+, the nav graph handles navigation after system confirmation.
+                        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R) {
+                            onNavigateBack()
+                        }
                     }
                 ) {
                     Text("Delete", color = MaterialTheme.colorScheme.error)

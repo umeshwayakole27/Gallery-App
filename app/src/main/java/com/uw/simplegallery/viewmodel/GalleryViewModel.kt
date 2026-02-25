@@ -1,18 +1,23 @@
 package com.uw.simplegallery.viewmodel
 
+import android.content.IntentSender
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.uw.simplegallery.data.model.AlbumItem
 import com.uw.simplegallery.data.model.MediaItem
+import com.uw.simplegallery.data.repository.MediaManager
 import com.uw.simplegallery.data.repository.MediaRepository
 import com.uw.simplegallery.usecase.GetAlbumsUseCase
 import com.uw.simplegallery.usecase.GetMediaItemsUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -31,6 +36,10 @@ class GalleryViewModel @Inject constructor(
     private val getAlbumsUseCase: GetAlbumsUseCase,
     private val mediaRepository: MediaRepository
 ) : ViewModel() {
+
+    companion object {
+        private const val TAG = "GalleryViewModel"
+    }
 
     private val _media = MutableStateFlow<List<MediaItem>>(emptyList())
     /** All media items (images and videos) available in the gallery. */
@@ -56,9 +65,34 @@ class GalleryViewModel @Inject constructor(
     /** Media items filtered for the currently viewed album. */
     val currentAlbumMedia: StateFlow<List<MediaItem>> = _currentAlbumMedia.asStateFlow()
 
+    /** Tracks the active album filter ID so it can be re-applied after media refresh. */
+    private var _currentAlbumId: String? = null
+
     private val _currentAlbumName = MutableStateFlow<String?>(null)
     /** Display name of the currently viewed album, or null if not in album view. */
     val currentAlbumName: StateFlow<String?> = _currentAlbumName.asStateFlow()
+
+    /**
+     * Emitted when the delete operation requires user confirmation via a
+     * system dialog (API 30+). The UI layer must observe this and launch the
+     * [IntentSender] via an [ActivityResultLauncher].
+     *
+     * Uses a [Channel] instead of [StateFlow] because delete confirmations are
+     * one-shot events that must be delivered exactly once. StateFlow can drop
+     * events if the value is cleared before the collector processes it.
+     */
+    private val _deleteConfirmationChannel = Channel<DeleteConfirmationEvent>(Channel.BUFFERED)
+    val deleteConfirmationEvent = _deleteConfirmationChannel.receiveAsFlow()
+
+    /**
+     * Event data for a delete confirmation request.
+     * @param intentSender The system intent to launch for user approval
+     * @param pendingIds The IDs that will be deleted upon approval
+     */
+    data class DeleteConfirmationEvent(
+        val intentSender: IntentSender,
+        val pendingIds: List<Long>
+    )
 
     init {
         loadMedia()
@@ -67,7 +101,8 @@ class GalleryViewModel @Inject constructor(
     /**
      * Loads all media items from local storage via MediaStore.
      * Updates [media], [isLoading], and [errorMessage] states.
-     * Also triggers album loading once media is loaded.
+     * Also triggers album loading once media is loaded, and refreshes
+     * the current album filter if one is active.
      */
     fun loadMedia() {
         viewModelScope.launch {
@@ -85,6 +120,9 @@ class GalleryViewModel @Inject constructor(
                     _isLoading.value = false
                     // Load albums after media is available
                     loadAlbums()
+                    // Refresh the current album filter if one is active,
+                    // so _currentAlbumMedia reflects deletions/changes.
+                    refreshCurrentAlbumFilter()
                 }
         }
     }
@@ -112,6 +150,7 @@ class GalleryViewModel @Inject constructor(
      * @param albumId The album ID (folder path or "ALL_PHOTOS")
      */
     fun setAlbumFilter(albumId: String) {
+        _currentAlbumId = albumId
         val album = _albums.value.find { it.id == albumId }
         if (album != null) {
             _currentAlbumMedia.value = album.mediaItems
@@ -135,27 +174,81 @@ class GalleryViewModel @Inject constructor(
      * Clears the album filter, resetting [currentAlbumMedia] and [currentAlbumName].
      */
     fun clearAlbumFilter() {
+        _currentAlbumId = null
         _currentAlbumMedia.value = emptyList()
         _currentAlbumName.value = null
     }
 
     /**
-     * Deletes a media item by its MediaStore ID and refreshes the lists.
+     * Re-applies the current album filter using the latest [_media] data.
+     * Called after [loadMedia] to ensure [currentAlbumMedia] reflects
+     * any deletions or changes. No-op if no album filter is active.
+     */
+    private fun refreshCurrentAlbumFilter() {
+        val albumId = _currentAlbumId ?: return
+        // Re-derive currentAlbumMedia from the fresh _media data.
+        // First try finding the album in the albums list (may not be updated yet),
+        // then fall back to filtering from _media directly.
+        _currentAlbumMedia.value = if (albumId == "ALL_PHOTOS") {
+            _media.value
+        } else {
+            _media.value.filter { it.folderName == albumId }
+        }
+    }
+
+    /**
+     * Deletes a single media item by its MediaStore ID.
+     * On API 30+, this emits a [DeleteConfirmationEvent] for the UI to handle.
      *
      * @param id MediaStore ID of the media item to delete
      */
     fun deleteMedia(id: Long) {
+        deleteMediaItems(listOf(id))
+    }
+
+    /**
+     * Deletes multiple media items by their MediaStore IDs.
+     * On API 30+, this emits a [DeleteConfirmationEvent] for the UI to handle.
+     *
+     * @param ids List of MediaStore IDs to delete
+     */
+    fun deleteMediaItems(ids: List<Long>) {
         viewModelScope.launch {
             try {
-                val success = mediaRepository.deleteMediaItem(id)
-                if (success) {
-                    // Refresh both media and albums after deletion
-                    loadMedia()
-                } else {
-                    _errorMessage.value = "Failed to delete media item"
+                when (val result = mediaRepository.deleteMediaItems(ids)) {
+                    is MediaManager.DeleteResult.Success -> {
+                        loadMedia()
+                    }
+                    is MediaManager.DeleteResult.RequiresConfirmation -> {
+                        _deleteConfirmationChannel.send(DeleteConfirmationEvent(
+                            intentSender = result.intentSender,
+                            pendingIds = result.pendingIds
+                        ))
+                    }
+                    is MediaManager.DeleteResult.Failure -> {
+                        _errorMessage.value = "Failed to delete media items"
+                    }
                 }
             } catch (e: Exception) {
-                _errorMessage.value = e.message ?: "Error deleting media item"
+                Log.e(TAG, "Exception in deleteMediaItems: ${e.message}", e)
+                _errorMessage.value = e.message ?: "Error deleting media items"
+            }
+        }
+    }
+
+    /**
+     * Called by the UI after the user confirms or denies the system delete dialog.
+     * On approval, verifies with MediaStore which items were actually deleted
+     * (handles partial approvals), updates the cache, and refreshes media.
+     *
+     * @param approved true if the user approved the deletion
+     * @param ids the IDs that were pending deletion
+     */
+    fun onDeleteConfirmationResult(approved: Boolean, ids: List<Long>) {
+        if (approved) {
+            viewModelScope.launch {
+                mediaRepository.removeDeletedItemsFromCache(ids)
+                loadMedia()
             }
         }
     }

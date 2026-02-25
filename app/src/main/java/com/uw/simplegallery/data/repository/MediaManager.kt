@@ -1,10 +1,15 @@
 package com.uw.simplegallery.data.repository
 
+import android.app.PendingIntent
+import android.app.RecoverableSecurityException
 import android.content.ContentResolver
+import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
+import android.content.IntentSender
 import android.database.Cursor
 import android.net.Uri
+import android.os.Build
 import android.provider.MediaStore
 import android.util.Log
 import com.uw.simplegallery.data.model.AlbumItem
@@ -17,6 +22,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
+
+private const val TAG = "MediaManager"
 
 /**
  * Data source responsible for loading media items and albums from device storage
@@ -42,7 +49,6 @@ class MediaManager @Inject constructor(
      * @return List of [MediaItem] found on the device
      */
     suspend fun loadAllMedia(): List<MediaItem> = withContext(Dispatchers.IO) {
-        Log.d("MediaManager", "Loading all media from MediaStore...")
 
         val mediaItems = mutableListOf<MediaItem>()
 
@@ -120,7 +126,6 @@ class MediaManager @Inject constructor(
         }
 
         _allMediaItems.value = mediaItems
-        Log.d("MediaManager", "Loaded ${mediaItems.size} media items from MediaStore")
         mediaItems
     }
 
@@ -188,32 +193,285 @@ class MediaManager @Inject constructor(
     }
 
     /**
-     * Deletes a media item from MediaStore by its ID.
-     *
-     * @param id The MediaStore ID of the item to delete
-     * @return true if the item was deleted, false otherwise
+     * Result of a delete operation. On Android 11+ (API 30+), the OS requires
+     * user confirmation via a system dialog, so we return an [IntentSender]
+     * for the UI layer to launch.
      */
-    suspend fun deleteMediaItem(id: Long): Boolean = withContext(Dispatchers.IO) {
-        return@withContext try {
-            val uri = MediaStore.Files.getContentUri("external", id)
-            val rowsDeleted = context.contentResolver.delete(uri, null, null)
-            if (rowsDeleted > 0) {
-                // Update the in-memory list
-                _allMediaItems.value = _allMediaItems.value.filter { it.id != id }
-                Log.d("MediaManager", "Deleted media item with id: $id")
-                true
-            } else {
-                Log.w("MediaManager", "No media item found with id: $id")
-                false
+    sealed class DeleteResult {
+        /** Deletion succeeded directly (API < 30, or app-owned files). */
+        data object Success : DeleteResult()
+        /** Deletion failed. */
+        data object Failure : DeleteResult()
+        /**
+         * User confirmation required (API 30+ for files not owned by this app).
+         * The UI must launch [intentSender] and, upon approval, call
+         * [removeDeletedItemsFromCache] to update the in-memory list.
+         */
+        data class RequiresConfirmation(
+            val intentSender: IntentSender,
+            val pendingIds: List<Long>
+        ) : DeleteResult()
+    }
+
+    /**
+     * Deletes a single media item. On API 30+ this may return
+     * [DeleteResult.RequiresConfirmation] with an [IntentSender] for
+     * the system delete-confirmation dialog.
+     */
+    suspend fun deleteMediaItem(id: Long): DeleteResult =
+        deleteMediaItems(listOf(id))
+
+    /**
+     * Verifies which URIs still exist in MediaStore using a batch query.
+     * This prevents crashes from trying to delete stale/non-existent URIs,
+     * including [IllegalArgumentException] from createDeleteRequest on API 30+
+     * and [SecurityException] on older APIs.
+     *
+     * Uses a single batch query instead of per-URI queries for efficiency.
+     *
+     * IMPORTANT: Returns media-type-specific URIs (Images or Video), NOT generic
+     * Files URIs. [MediaStore.createDeleteRequest] requires URIs from
+     * [MediaStore.Images.Media] or [MediaStore.Video.Media] — it rejects
+     * [MediaStore.Files] URIs with "All requested items must be Media items".
+     *
+     * @param ids The MediaStore IDs to verify
+     * @return Pair of (valid IDs, valid URIs) that still exist in MediaStore
+     */
+    private fun filterExistingUris(ids: List<Long>): Pair<List<Long>, List<Uri>> {
+        if (ids.isEmpty()) return Pair(emptyList(), emptyList())
+
+        val validIds = mutableListOf<Long>()
+        val validUris = mutableListOf<Uri>()
+
+        // Batch query: query all IDs at once using IN clause for efficiency
+        // Also fetch MEDIA_TYPE so we can build the correct content URI
+        // (Images vs Video) required by createDeleteRequest.
+        val chunkSize = 500
+        for (chunk in ids.chunked(chunkSize)) {
+            val placeholders = chunk.joinToString(",") { "?" }
+            val selection = "${MediaStore.Files.FileColumns._ID} IN ($placeholders)"
+            val selectionArgs = chunk.map { it.toString() }.toTypedArray()
+
+            try {
+                context.contentResolver.query(
+                    MediaStore.Files.getContentUri("external"),
+                    arrayOf(
+                        MediaStore.Files.FileColumns._ID,
+                        MediaStore.Files.FileColumns.MEDIA_TYPE
+                    ),
+                    selection,
+                    selectionArgs,
+                    null
+                )?.use { cursor ->
+                    val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID)
+                    val mediaTypeColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MEDIA_TYPE)
+                    while (cursor.moveToNext()) {
+                        val id = cursor.getLong(idColumn)
+                        val mediaType = cursor.getInt(mediaTypeColumn)
+
+                        // Build media-type-specific URI required by createDeleteRequest
+                        val baseUri = when (mediaType) {
+                            MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE ->
+                                MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                            MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO ->
+                                MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                            else -> {
+                                Log.w(TAG, "Skipping non-media item id=$id mediaType=$mediaType")
+                                continue
+                            }
+                        }
+                        validIds.add(id)
+                        validUris.add(ContentUris.withAppendedId(baseUri, id))
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Error querying MediaStore for IDs: ${e.message}")
+                // Fallback: use Images URI as default (most common case)
+                for (id in chunk) {
+                    validIds.add(id)
+                    validUris.add(ContentUris.withAppendedId(
+                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id
+                    ))
+                }
             }
-        } catch (e: SecurityException) {
-            // On Android 10+ (API 29), deleting items owned by other apps requires
-            // RecoverableSecurityException handling. For now, log and return false.
-            Log.e("MediaManager", "SecurityException deleting media: ${e.message}", e)
-            false
+        }
+
+        return Pair(validIds, validUris)
+    }
+
+    /**
+     * Deletes multiple media items by their MediaStore IDs.
+     *
+     * Handles all Android versions from API 28 (Android 9) through API 36 (Android 16):
+     *
+     * - **API 30+ (Android 11–16)**: Always uses [MediaStore.createDeleteRequest] to
+     *   produce a system confirmation dialog. Returns [DeleteResult.RequiresConfirmation].
+     *   This is the recommended approach for Android 11+ and is the pattern used by
+     *   the Tulsi gallery app. The system handles MANAGE_MEDIA permissions automatically —
+     *   when the app has MANAGE_MEDIA, the dialog auto-approves or shows a simpler prompt.
+     *   Direct contentResolver.delete() is NOT used on API 30+ because it can silently
+     *   return 0 rows on some OEMs/API levels even when MANAGE_MEDIA is granted.
+     *
+     * - **API 29 (Android 10)**: Attempts direct delete per-URI. On
+     *   [RecoverableSecurityException], collects failed URIs and uses the exception's
+     *   IntentSender for user confirmation.
+     *
+     * - **API 28 (Android 9)**: Direct [ContentResolver.delete] with
+     *   WRITE_EXTERNAL_STORAGE permission.
+     *
+     * All paths verify URIs exist before attempting deletion to prevent crashes
+     * from stale MediaStore IDs.
+     *
+     * @param ids The MediaStore IDs of the items to delete
+     * @return [DeleteResult] indicating success, failure, or user-confirmation needed
+     */
+    suspend fun deleteMediaItems(ids: List<Long>): DeleteResult = withContext(Dispatchers.IO) {
+        if (ids.isEmpty()) {
+            return@withContext DeleteResult.Failure
+        }
+
+        // Verify URIs exist in MediaStore before attempting deletion.
+        val (validIds, validUris) = filterExistingUris(ids)
+        if (validIds.isEmpty()) {
+            // All items were already deleted from MediaStore — clean up cache
+            _allMediaItems.value = _allMediaItems.value.filter { it.id !in ids }
+            return@withContext DeleteResult.Success
+        }
+
+        // ── Android 11+ (API 30+) ───────────────────────────────────────
+        // Covers Android 11, 12, 13, 14, 15, and 16.
+        //
+        // Always use createDeleteRequest — this is the Tulsi gallery pattern.
+        // The system handles MANAGE_MEDIA automatically: when granted, the dialog
+        // may auto-approve or show a simplified confirmation. We never try direct
+        // contentResolver.delete() on API 30+ because:
+        // 1. It can silently return 0 on some devices even with MANAGE_MEDIA
+        // 2. createDeleteRequest is the official recommended API
+        // 3. It provides a consistent user experience with system-level confirmation
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            return@withContext try {
+                val pendingIntent: PendingIntent = MediaStore.createDeleteRequest(
+                    context.contentResolver,
+                    validUris
+                )
+                DeleteResult.RequiresConfirmation(pendingIntent.intentSender, validIds)
+            } catch (e: IllegalArgumentException) {
+                // URIs are invalid — this should not happen now that we use
+                // media-type-specific URIs, but log it clearly if it does.
+                Log.e(TAG, "Invalid URIs for delete request: ${e.message}", e)
+                DeleteResult.Failure
+            } catch (e: SecurityException) {
+                Log.e(TAG, "SecurityException creating delete request: ${e.message}", e)
+                DeleteResult.Failure
+            } catch (e: Exception) {
+                Log.e(TAG, "Error creating delete request: ${e.message}", e)
+                DeleteResult.Failure
+            }
+        }
+
+        // ── Android 10 (API 29) ─────────────────────────────────────────
+        // Scoped storage introduced. Direct delete works for app-owned files.
+        // Non-owned files throw RecoverableSecurityException.
+        // We collect all failures and request user confirmation via the exception's
+        // IntentSender. On Q, each RecoverableSecurityException only covers one URI,
+        // so for multiple non-owned files the user may need to approve multiple times.
+        if (Build.VERSION.SDK_INT == Build.VERSION_CODES.Q) {
+            return@withContext try {
+                var deletedCount = 0
+                val failedUris = mutableListOf<Uri>()
+                val failedIds = mutableListOf<Long>()
+                var lastRecoverableException: RecoverableSecurityException? = null
+
+                for (i in validUris.indices) {
+                    try {
+                        val rows = context.contentResolver.delete(validUris[i], null, null)
+                        if (rows > 0) {
+                            deletedCount++
+                        } else {
+                            failedUris.add(validUris[i])
+                            failedIds.add(validIds[i])
+                        }
+                    } catch (e: RecoverableSecurityException) {
+                        lastRecoverableException = e
+                        failedUris.add(validUris[i])
+                        failedIds.add(validIds[i])
+                    } catch (e: SecurityException) {
+                        Log.w(TAG, "SecurityException on Q for ${validUris[i]}: ${e.message}")
+                        failedUris.add(validUris[i])
+                        failedIds.add(validIds[i])
+                    }
+                }
+
+                // Update cache for successfully deleted items
+                if (deletedCount > 0) {
+                    val successIds = validIds.filterNot { it in failedIds }
+                    _allMediaItems.value = _allMediaItems.value.filter { it.id !in successIds }
+                }
+
+                when {
+                    failedIds.isEmpty() -> {
+                        DeleteResult.Success
+                    }
+                    lastRecoverableException != null -> {
+                        // Use the exception's IntentSender for user confirmation.
+                        // On Q this only handles the last failed file.
+                        DeleteResult.RequiresConfirmation(
+                            lastRecoverableException.userAction.actionIntent.intentSender,
+                            failedIds
+                        )
+                    }
+                    else -> {
+                        Log.w(TAG, "Delete returned 0 rows without exception for ${failedIds.size} items")
+                        DeleteResult.Failure
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error deleting media on Q: ${e.message}", e)
+                DeleteResult.Failure
+            }
+        }
+
+        // ── Android 9 and below (API 28) ────────────────────────────────
+        // Legacy storage model. Direct delete with WRITE_EXTERNAL_STORAGE permission.
+        return@withContext try {
+            var deletedCount = 0
+            for (uri in validUris) {
+                try {
+                    val rows = context.contentResolver.delete(uri, null, null)
+                    if (rows > 0) deletedCount++
+                } catch (e: SecurityException) {
+                    Log.w(TAG, "SecurityException deleting $uri: ${e.message}")
+                }
+            }
+            if (deletedCount > 0) {
+                _allMediaItems.value = _allMediaItems.value.filter { it.id !in validIds }
+                DeleteResult.Success
+            } else {
+                Log.w(TAG, "Failed to delete any items on API ${Build.VERSION.SDK_INT}")
+                DeleteResult.Failure
+            }
         } catch (e: Exception) {
-            Log.e("MediaManager", "Error deleting media: ${e.message}", e)
-            false
+            Log.e(TAG, "Error deleting media: ${e.message}", e)
+            DeleteResult.Failure
+        }
+    }
+
+    /**
+     * Removes items from the in-memory cache after the user confirms deletion
+     * via the system dialog. Called by the UI layer after [DeleteResult.RequiresConfirmation]
+     * is handled successfully.
+     *
+     * Also verifies with MediaStore that items are actually gone, to handle cases
+     * where the user approved deletion of some items but not all (partial approval).
+     */
+    fun removeDeletedItemsFromCache(ids: List<Long>) {
+        // First, check which IDs are actually still in MediaStore
+        // This handles partial approvals correctly
+        val (stillExistingIds, _) = filterExistingUris(ids)
+        val actuallyDeletedIds = ids.filterNot { it in stillExistingIds }
+
+        if (actuallyDeletedIds.isNotEmpty()) {
+            _allMediaItems.value = _allMediaItems.value.filter { it.id !in actuallyDeletedIds }
         }
     }
 
@@ -275,14 +533,14 @@ class MediaManager @Inject constructor(
                 contentValues.put(MediaStore.Images.Media.IS_PENDING, 0)
                 resolver.update(uri, contentValues, null, null)
 
-                Log.d("MediaManager", "Created album with placeholder image: $folderName $uri")
+                Log.d(TAG, "Created album with placeholder image: $folderName $uri")
                 true
             } else {
-                Log.e("MediaManager", "Failed to create album: $folderName")
+                Log.e(TAG, "Failed to create album: $folderName")
                 false
             }
         } catch (e: Exception) {
-            Log.e("MediaManager", "Error creating album: ${e.message}", e)
+            Log.e(TAG, "Error creating album: ${e.message}", e)
             false
         }
     }

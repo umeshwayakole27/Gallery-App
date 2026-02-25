@@ -38,8 +38,12 @@ class MediaRepositoryImpl @Inject constructor(
         emit(mediaManager.searchMedia(query))
     }
 
-    override suspend fun deleteMediaItem(id: Long): Boolean {
-        return mediaManager.deleteMediaItem(id)
+    override suspend fun deleteMediaItems(ids: List<Long>): MediaManager.DeleteResult {
+        return mediaManager.deleteMediaItems(ids)
+    }
+
+    override suspend fun removeDeletedItemsFromCache(ids: List<Long>) {
+        mediaManager.removeDeletedItemsFromCache(ids)
     }
 
     override suspend fun createAlbum(folderName: String): Boolean {

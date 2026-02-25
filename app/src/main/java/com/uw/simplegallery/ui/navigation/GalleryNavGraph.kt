@@ -1,5 +1,10 @@
 package com.uw.simplegallery.ui.navigation
 
+import android.app.Activity
+import android.util.Log
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,7 +23,10 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -35,6 +43,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.uw.simplegallery.data.model.AlbumItem
+import com.uw.simplegallery.data.model.MediaItem
 import com.uw.simplegallery.ui.components.FloatingBottomNavBar
 import com.uw.simplegallery.ui.components.FloatingNavTab
 import com.uw.simplegallery.ui.components.floatingNavBarTotalHeight
@@ -125,8 +135,49 @@ fun GalleryNavGraph() {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
 
-    // Only show bottom bar on top-level screens
-    val showBottomBar = currentDestination?.route in bottomNavRoutes
+    // Selection state — scoped to the nav graph so it persists across tab switches
+    val selectedMediaItems = remember { mutableStateListOf<MediaItem>() }
+    val selectedAlbumItems = remember { mutableStateListOf<AlbumItem>() }
+
+    // ── Delete confirmation launcher (API 30+) ─────────────────────────
+    // Tracks the IDs that are pending user confirmation in the system dialog.
+    var pendingDeleteIds by remember { mutableStateOf<List<Long>>(emptyList()) }
+
+    val deleteConfirmLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        val approved = result.resultCode == Activity.RESULT_OK
+        viewModel.onDeleteConfirmationResult(approved, pendingDeleteIds)
+        if (approved) {
+            // Clear both media and album selections after successful deletion
+            selectedMediaItems.clear()
+            selectedAlbumItems.clear()
+        }
+        pendingDeleteIds = emptyList()
+    }
+
+    // Observe delete confirmation events from the ViewModel and launch the system dialog.
+    // Uses Channel-based flow for reliable one-shot event delivery — events are consumed
+    // exactly once, preventing the race condition where StateFlow could drop events.
+    LaunchedEffect(Unit) {
+        viewModel.deleteConfirmationEvent.collect { event ->
+            pendingDeleteIds = event.pendingIds
+            try {
+                val request = IntentSenderRequest.Builder(event.intentSender).build()
+                deleteConfirmLauncher.launch(request)
+            } catch (e: Exception) {
+                Log.e("GalleryNavGraph", "Failed to launch delete confirmation dialog: ${e.message}", e)
+            }
+        }
+    }
+
+    // Derived: true when any selection is active (media or albums)
+    val isAnySelectionActive by remember {
+        derivedStateOf { selectedMediaItems.isNotEmpty() || selectedAlbumItems.isNotEmpty() }
+    }
+
+    // Only show bottom bar on top-level screens AND when not in selection mode
+    val showBottomBar = currentDestination?.route in bottomNavRoutes && !isAnySelectionActive
     val isOnAlbumsScreen = currentDestination?.route == GalleryRoutes.ALBUMS
 
     // Total height of the floating nav bar for offsetting content and FAB
@@ -150,7 +201,9 @@ fun GalleryNavGraph() {
                     viewModel = viewModel,
                     onImageClick = { imageId ->
                         navController.navigate(GalleryRoutes.imageDetail(imageId))
-                    }
+                    },
+                    selectedItemsList = selectedMediaItems,
+                    extraBottomPadding = navBarHeight
                 )
             }
 
@@ -176,6 +229,7 @@ fun GalleryNavGraph() {
                     onAlbumClick = { albumId ->
                         navController.navigate(GalleryRoutes.albumDetail(albumId))
                     },
+                    selectedAlbumsList = selectedAlbumItems,
                     extraBottomPadding = navBarHeight,
                     onScrolledDown = { scrolledDown ->
                         albumsScrolledDown = scrolledDown
@@ -198,14 +252,16 @@ fun GalleryNavGraph() {
                     onImageClick = { imageId ->
                         navController.navigate(GalleryRoutes.imageDetail(imageId))
                     },
+                    selectedItemsList = selectedMediaItems,
                     albumId = albumId,
                     onNavigateBack = { navController.popBackStack() }
                 )
             }
         }
 
-        // Extended FAB — only on Albums screen, positioned above the floating nav bar
-        if (isOnAlbumsScreen) {
+        // Extended FAB — only on Albums screen when not in selection mode,
+        // positioned above the floating nav bar
+        if (isOnAlbumsScreen && !isAnySelectionActive) {
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
@@ -231,6 +287,7 @@ fun GalleryNavGraph() {
         }
 
         // Floating nav bar overlaid at the bottom of the screen
+        // Hidden when any selection is active
         if (showBottomBar) {
             Box(modifier = Modifier.align(Alignment.BottomCenter)) {
                 FloatingBottomNavBar(

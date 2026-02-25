@@ -27,12 +27,21 @@ interface MediaRepository {
     fun searchMedia(query: String): Flow<List<MediaItem>>
 
     /**
-     * Deletes a media item by its MediaStore ID.
+     * Deletes media items by their MediaStore IDs. On API 30+ this may
+     * return [MediaManager.DeleteResult.RequiresConfirmation] containing
+     * an IntentSender for the system confirmation dialog.
      *
-     * @param id The MediaStore ID of the item to delete
-     * @return true if deletion was successful, false otherwise
+     * @param ids The MediaStore IDs of the items to delete
+     * @return [MediaManager.DeleteResult] indicating success, failure, or user-confirmation needed
      */
-    suspend fun deleteMediaItem(id: Long): Boolean
+    suspend fun deleteMediaItems(ids: List<Long>): MediaManager.DeleteResult
+
+    /**
+     * Removes items from the in-memory cache after the user approves deletion
+     * via the system dialog (API 30+). Verifies with MediaStore which items
+     * were actually deleted to handle partial approvals.
+     */
+    suspend fun removeDeletedItemsFromCache(ids: List<Long>)
 
     /**
      * Creates a new album (folder) with the given name.
