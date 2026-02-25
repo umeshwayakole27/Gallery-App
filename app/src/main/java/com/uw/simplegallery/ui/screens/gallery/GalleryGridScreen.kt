@@ -13,13 +13,12 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -42,35 +41,49 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
-import com.uw.simplegallery.data.model.ImageItem
+import com.uw.simplegallery.data.model.MediaItem
 import com.uw.simplegallery.viewmodel.GalleryViewModel
-
-// TODO: Request READ_EXTERNAL_STORAGE or READ_MEDIA_IMAGES permission
-// TODO: Implement pagination / infinite scroll
-// TODO: Add empty state UI when no images are found
-// TODO: Add search/filter functionality
-// TODO: Add accessibility labels (contentDescription) to all images
-// TODO: Handle configuration changes gracefully with rememberSaveable
 
 /**
  * Main gallery screen displaying a grid of image thumbnails.
  *
- * Features:
- * - 3-column grid layout with rounded image cards
- * - Top app bar with search action
- * - FAB for adding new images
- * - Loading and error state handling
+ * Can operate in two modes:
+ * 1. **Gallery mode** (default): Shows all media from [GalleryViewModel.media]
+ *    with a search icon in the top bar.
+ * 2. **Album detail mode**: When [albumId] is provided, shows only media from
+ *    that album via [GalleryViewModel.currentAlbumMedia], with a back arrow
+ *    and the album name as the title.
  *
  * @param viewModel The [GalleryViewModel] providing image data
  * @param onImageClick Callback when an image is tapped, receives the image ID
+ * @param albumId Optional album ID to filter media. When non-null, the screen
+ *   shows only media from this album with back navigation.
+ * @param onNavigateBack Callback for back navigation in album detail mode
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GalleryGridScreen(
     viewModel: GalleryViewModel,
-    onImageClick: (Long) -> Unit
+    onImageClick: (Long) -> Unit,
+    albumId: String? = null,
+    onNavigateBack: (() -> Unit)? = null
 ) {
-    val images by viewModel.images.collectAsState()
+    val isAlbumMode = albumId != null
+
+    // Apply album filter when in album mode
+    LaunchedEffect(albumId) {
+        if (albumId != null) {
+            viewModel.setAlbumFilter(albumId)
+        }
+    }
+
+    val images by if (isAlbumMode) {
+        viewModel.currentAlbumMedia.collectAsState()
+    } else {
+        viewModel.media.collectAsState()
+    }
+
+    val albumName by viewModel.currentAlbumName.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
 
@@ -84,38 +97,38 @@ fun GalleryGridScreen(
         }
     }
 
+    val title = if (isAlbumMode) albumName ?: "Album" else "Gallery"
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
-                title = { Text("Gallery") },
+                title = { Text(title) },
+                navigationIcon = {
+                    if (isAlbumMode && onNavigateBack != null) {
+                        IconButton(onClick = onNavigateBack) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Navigate back"
+                            )
+                        }
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface,
                     titleContentColor = MaterialTheme.colorScheme.onSurface
                 ),
                 actions = {
-                    // TODO: Add search/filter functionality
-                    IconButton(onClick = { /* TODO: Open search */ }) {
-                        Icon(
-                            imageVector = Icons.Default.Search,
-                            contentDescription = "Search images"
-                        )
+                    if (!isAlbumMode) {
+                        IconButton(onClick = { /* TODO: Open search */ }) {
+                            Icon(
+                                imageVector = Icons.Default.Search,
+                                contentDescription = "Search images"
+                            )
+                        }
                     }
                 }
             )
-        },
-        floatingActionButton = {
-            // TODO: Implement image picker/camera intent to add new images
-            FloatingActionButton(
-                onClick = { /* TODO: Add new image */ },
-                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = "Add new image"
-                )
-            }
         }
     ) { paddingValues ->
         Box(
@@ -124,17 +137,15 @@ fun GalleryGridScreen(
                 .padding(paddingValues)
         ) {
             if (isLoading && images.isEmpty()) {
-                // Loading state
                 CircularProgressIndicator(
                     modifier = Modifier.align(Alignment.Center)
                 )
             } else if (images.isEmpty()) {
-                // TODO: Add empty state UI when no images are found
                 EmptyGalleryState(
-                    modifier = Modifier.align(Alignment.Center)
+                    modifier = Modifier.align(Alignment.Center),
+                    isAlbumMode = isAlbumMode
                 )
             } else {
-                // Image grid
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(3),
                     contentPadding = PaddingValues(4.dp),
@@ -160,14 +171,12 @@ fun GalleryGridScreen(
 /**
  * A single image card in the gallery grid.
  *
- * Displays a thumbnail with rounded corners and a ripple effect on tap.
- *
- * @param image The [ImageItem] to display
+ * @param image The [MediaItem] to display
  * @param onClick Callback when this item is tapped
  */
 @Composable
 private fun ImageGridItem(
-    image: ImageItem,
+    image: MediaItem,
     onClick: () -> Unit
 ) {
     Card(
@@ -184,7 +193,7 @@ private fun ImageGridItem(
                 .data(image.uri.toString())
                 .crossfade(true)
                 .build(),
-            contentDescription = image.name, // TODO: Add accessibility labels (contentDescription) to all images
+            contentDescription = image.name,
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize()
         )
@@ -192,22 +201,28 @@ private fun ImageGridItem(
 }
 
 /**
- * Empty state displayed when no images are found in the gallery.
+ * Empty state displayed when no images are found.
+ *
+ * @param isAlbumMode Whether the screen is in album detail mode
  */
 @Composable
-private fun EmptyGalleryState(modifier: Modifier = Modifier) {
+private fun EmptyGalleryState(
+    modifier: Modifier = Modifier,
+    isAlbumMode: Boolean = false
+) {
     Column(
         modifier = modifier.padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
         Text(
-            text = "No images found",
+            text = if (isAlbumMode) "No images in this album" else "No images found",
             style = MaterialTheme.typography.headlineSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Text(
-            text = "Tap the + button to add images",
+            text = if (isAlbumMode) "Photos added to this album will appear here"
+            else "Your photos and videos will appear here",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 8.dp)

@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -24,7 +25,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -32,6 +35,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
@@ -52,15 +56,29 @@ import com.uw.simplegallery.viewmodel.GalleryViewModel
  *
  * @param viewModel The [GalleryViewModel] providing album data
  * @param onAlbumClick Callback when an album is tapped, receives the album ID
+ * @param extraBottomPadding Extra padding at the bottom of the grid to avoid
+ *   content being hidden behind the floating nav bar
+ * @param onScrolledDown Called with `true` when the user scrolls away from the top,
+ *   `false` when at the top — used to collapse/expand the Extended FAB
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AlbumsScreen(
     viewModel: GalleryViewModel,
-    onAlbumClick: (Long) -> Unit
+    onAlbumClick: (String) -> Unit,
+    extraBottomPadding: Dp = 0.dp,
+    onScrolledDown: ((Boolean) -> Unit)? = null
 ) {
     val albums by viewModel.albums.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
+
+    val gridState = rememberLazyGridState()
+
+    // Report scroll state to parent for FAB expand/collapse
+    val isScrolledDown by remember {
+        derivedStateOf { gridState.firstVisibleItemIndex > 0 }
+    }
+    onScrolledDown?.invoke(isScrolledDown)
 
     Scaffold(
         topBar = {
@@ -92,8 +110,14 @@ fun AlbumsScreen(
                 )
             } else {
                 LazyVerticalGrid(
+                    state = gridState,
                     columns = GridCells.Fixed(2),
-                    contentPadding = PaddingValues(8.dp),
+                    contentPadding = PaddingValues(
+                        start = 8.dp,
+                        end = 8.dp,
+                        top = 8.dp,
+                        bottom = 8.dp + extraBottomPadding
+                    ),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxSize()
@@ -112,6 +136,8 @@ fun AlbumsScreen(
         }
     }
 }
+
+// CreateAlbumDialog removed — now managed at the navigation level
 
 /**
  * A single album card in the albums grid.
@@ -160,7 +186,7 @@ private fun AlbumGridItem(
                     contentColor = MaterialTheme.colorScheme.onPrimaryContainer
                 ) {
                     Text(
-                        text = "${album.imageCount}",
+                        text = "${album.mediaCount}",
                         modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
                     )
                 }

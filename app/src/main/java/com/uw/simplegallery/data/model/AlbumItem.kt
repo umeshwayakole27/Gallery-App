@@ -1,35 +1,20 @@
 package com.uw.simplegallery.data.model
 
-import android.net.Uri
-
 /**
- * Represents an album (folder/bucket) containing images.
+ * Represents an album (folder/bucket) containing media items.
  *
- * @param id Unique identifier for the album
+ * @param id Unique identifier for the album (folder path or "ALL_PHOTOS")
  * @param name Display name of the album
- * @param coverUri URI of the cover image (typically the most recent image)
- * @param imageCount Total number of images in the album
+ * @param mediaItems List of media items inside this album
  */
 data class AlbumItem(
-    val id: Long,
-    val name: String,
-    val coverUri: Uri,
-    val imageCount: Int
+    val id: String,                // Folder path or unique ID
+    val name: String,              // Folder display name
+    val mediaItems: List<MediaItem> // List of media items inside the album
 ) {
-    companion object {
-        /**
-         * Creates placeholder [AlbumItem] instances for the prototype UI.
-         */
-        fun placeholders(): List<AlbumItem> {
-            val albumNames = listOf("Camera", "Downloads", "Screenshots", "Wallpapers", "WhatsApp", "Edited")
-            return albumNames.mapIndexed { index, name ->
-                AlbumItem(
-                    id = index.toLong(),
-                    name = name,
-                    coverUri = Uri.parse("https://picsum.photos/300/300?random=${index + 100}"),
-                    imageCount = (5..50).random()
-                )
-            }
-        }
-    }
+    val mediaCount: Int
+        get() = mediaItems.size
+
+    val coverUri: String?
+        get() = mediaItems.firstOrNull()?.uri
 }
