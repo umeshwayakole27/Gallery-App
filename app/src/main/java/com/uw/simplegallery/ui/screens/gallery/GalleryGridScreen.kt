@@ -3,7 +3,10 @@ package com.uw.simplegallery.ui.screens.gallery
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -11,6 +14,9 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
@@ -52,16 +58,23 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -85,6 +98,7 @@ import com.uw.simplegallery.ui.selection.unselectItem
 import com.uw.simplegallery.viewmodel.GalleryViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 
 /**
  * Main gallery screen displaying a grid of image thumbnails with multi-select support.
@@ -150,6 +164,27 @@ fun GalleryGridScreen(
     val isDragSelecting = remember { mutableStateOf(false) }
     val localDensity = LocalDensity.current
     val haptic = LocalHapticFeedback.current
+
+    // Pinch-to-zoom column count state
+    // Column count persists across recompositions but not process death (use rememberSaveable)
+    var columnCount by rememberSaveable { mutableIntStateOf(3) }
+    // Live pinch scale: applied via graphicsLayer during the gesture for real-time feedback.
+    // When the user pinches, this smoothly scales the entire grid visually.
+    // When the pinch ends or crosses a column-count threshold, it springs back to 1.0.
+    val pinchScale = remember { mutableFloatStateOf(1f) }
+    // Animatable used only for the spring-back animation when the pinch gesture ends
+    val pinchScaleAnimatable = remember { Animatable(1f) }
+    // Track cumulative pinch scale within a single gesture (for threshold detection)
+    val cumulativeScale = remember { mutableFloatStateOf(1f) }
+    // Whether a pinch gesture is currently active
+    var isPinching by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
+
+    // Sync animatable value back to pinchScale state when spring-back animates
+    LaunchedEffect(Unit) {
+        snapshotFlow { pinchScaleAnimatable.value }
+            .collect { pinchScale.floatValue = it }
+    }
 
     // Auto-scroll coroutine: continuously scrolls when drag is near viewport edges
     LaunchedEffect(scrollSpeed.floatValue) {
@@ -240,9 +275,9 @@ fun GalleryGridScreen(
             } else {
                 LazyVerticalGrid(
                     state = gridState,
-                    columns = GridCells.Fixed(3),
-                    // Disable user scroll during drag-select to prevent gesture conflict
-                    userScrollEnabled = !isDragSelecting.value,
+                    columns = GridCells.Fixed(columnCount.coerceIn(1, 6)),
+                    // Disable user scroll during drag-select or pinch to prevent gesture conflict
+                    userScrollEnabled = !isDragSelecting.value && !isPinching,
                     contentPadding = PaddingValues(
                         start = 4.dp,
                         end = 4.dp,
@@ -253,6 +288,35 @@ fun GalleryGridScreen(
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                     modifier = Modifier
                         .fillMaxSize()
+                        // Live pinch scale: visually scales the grid during the pinch gesture
+                        .graphicsLayer {
+                            scaleX = pinchScale.floatValue
+                            scaleY = pinchScale.floatValue
+                        }
+                        .pinchToZoomHandler(
+                            columnCount = columnCount,
+                            cumulativeScale = cumulativeScale,
+                            pinchScale = pinchScale,
+                            onColumnCountChange = { newCount ->
+                                columnCount = newCount
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            },
+                            onPinchStart = { isPinching = true },
+                            onPinchEnd = {
+                                isPinching = false
+                                // Spring-animate pinchScale back to 1.0 for a smooth settle
+                                coroutineScope.launch {
+                                    pinchScaleAnimatable.snapTo(pinchScale.floatValue)
+                                    pinchScaleAnimatable.animateTo(
+                                        1f,
+                                        animationSpec = spring(
+                                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                                            stiffness = Spring.StiffnessMedium
+                                        )
+                                    )
+                                }
+                            }
+                        )
                         .dragSelectionHandler(
                             state = gridState,
                             selectedItemsList = selectedItemsList,
@@ -387,6 +451,107 @@ private fun SelectableImageGridItem(
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(24.dp)
             )
+        }
+    }
+}
+
+// ── Pinch-to-Zoom Column Count ──────────────────────────────────────────
+// Two-finger pinch gesture on the grid changes the column count with smooth
+// visual feedback:
+//
+// 1. **Live scale**: During the pinch, the entire grid visually scales via
+//    graphicsLayer (scaleX/scaleY), giving immediate, fluid feedback.
+// 2. **Threshold snap**: When cumulative scale crosses a threshold (>1.4 to
+//    zoom in, <0.71 to zoom out), the column count changes by 1 and the
+//    live scale resets — the grid re-layouts at the new column count.
+// 3. **Spring settle**: When the pinch ends, pinchScale animates back to 1.0
+//    with a spring for a satisfying bounce/settle.
+//
+// Uses awaitEachGesture to only activate when 2+ pointers are down,
+// avoiding conflict with single-finger drag-to-select.
+
+private const val MIN_COLUMNS = 1
+private const val MAX_COLUMNS = 6
+private const val ZOOM_IN_THRESHOLD = 1.4f   // cumulative scale to decrease columns
+private const val ZOOM_OUT_THRESHOLD = 0.71f  // cumulative scale to increase columns
+// Clamp live pinch scale so the grid doesn't scale too far before snapping
+private const val MAX_PINCH_SCALE = 1.35f
+private const val MIN_PINCH_SCALE = 0.75f
+
+/**
+ * Modifier that enables pinch-to-zoom column count changes on the grid.
+ *
+ * Drives [pinchScale] in real-time during the gesture so the grid visually
+ * scales as the user pinches. When cumulative scale crosses a threshold,
+ * calls [onColumnCountChange] and resets both scales. When the gesture ends,
+ * calls [onPinchEnd] so the caller can spring-animate [pinchScale] back to 1.0.
+ *
+ * @param columnCount Current column count
+ * @param cumulativeScale Mutable float state tracking cumulative scale within a gesture
+ * @param pinchScale Mutable float state controlling the live visual scale of the grid
+ * @param onColumnCountChange Callback with the new column count
+ * @param onPinchStart Called when a pinch gesture begins
+ * @param onPinchEnd Called when the pinch gesture ends (for spring settle animation)
+ */
+private fun Modifier.pinchToZoomHandler(
+    columnCount: Int,
+    cumulativeScale: MutableFloatState,
+    pinchScale: MutableFloatState,
+    onColumnCountChange: (Int) -> Unit,
+    onPinchStart: () -> Unit = {},
+    onPinchEnd: () -> Unit = {}
+) = pointerInput(columnCount) {
+    awaitEachGesture {
+        // Wait for the first pointer down
+        awaitFirstDown(requireUnconsumed = false)
+        cumulativeScale.floatValue = 1f
+        var pinchStarted = false
+
+        do {
+            val event = awaitPointerEvent()
+
+            // Only process when 2+ fingers are down (pinch gesture)
+            if (event.changes.size >= 2) {
+                val zoom = event.calculateZoom()
+                if (zoom != 1f) {
+                    if (!pinchStarted) {
+                        pinchStarted = true
+                        onPinchStart()
+                    }
+
+                    cumulativeScale.floatValue *= zoom
+
+                    // Drive the live visual scale (clamped so it doesn't go too far)
+                    val newVisualScale = (pinchScale.floatValue * zoom)
+                        .coerceIn(MIN_PINCH_SCALE, MAX_PINCH_SCALE)
+                    pinchScale.floatValue = newVisualScale
+
+                    // Zoom in (pinch out) → fewer columns
+                    if (cumulativeScale.floatValue > ZOOM_IN_THRESHOLD && columnCount > MIN_COLUMNS) {
+                        onColumnCountChange(columnCount - 1)
+                        cumulativeScale.floatValue = 1f
+                        pinchScale.floatValue = 1f // reset visual scale for the new layout
+                    }
+                    // Zoom out (pinch in) → more columns
+                    else if (cumulativeScale.floatValue < ZOOM_OUT_THRESHOLD && columnCount < MAX_COLUMNS) {
+                        onColumnCountChange(columnCount + 1)
+                        cumulativeScale.floatValue = 1f
+                        pinchScale.floatValue = 1f
+                    }
+
+                    // Consume to prevent scroll interference during pinch
+                    event.changes.forEach { change ->
+                        if (change.positionChanged()) {
+                            change.consume()
+                        }
+                    }
+                }
+            }
+        } while (event.changes.any { it.pressed })
+
+        // Gesture ended
+        if (pinchStarted) {
+            onPinchEnd()
         }
     }
 }
