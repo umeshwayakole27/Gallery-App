@@ -42,6 +42,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -51,7 +52,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -61,14 +61,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.net.toUri
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.uw.simplegallery.data.model.MediaItem
+import com.uw.simplegallery.data.model.MediaType
+import com.uw.simplegallery.ui.screens.video.VideoPlayer
 import com.uw.simplegallery.viewmodel.GalleryViewModel
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.abs
 
 /**
  * Full-screen image detail screen with enhanced features.
@@ -155,18 +159,47 @@ fun ImageDetailScreen(
                 color = Color.White
             )
         } else {
-            // Horizontal pager for swiping between images
+            // Determine if current page is a video (to disable pager swipe for gesture conflicts)
+            val isCurrentPageVideo by remember {
+                derivedStateOf {
+                    imageList.getOrNull(pagerState.currentPage)?.mediaType is MediaType.Video
+                }
+            }
+
+            // Horizontal pager for swiping between images and videos
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier.fillMaxSize(),
-                key = { imageList.getOrNull(it)?.id ?: it }
+                key = { imageList.getOrNull(it)?.id ?: it },
+                userScrollEnabled = !isCurrentPageVideo
             ) { page ->
                 val mediaItem = imageList.getOrNull(page)
                 if (mediaItem != null) {
-                    ZoomableImage(
-                        mediaItem = mediaItem,
-                        onTap = { showBars = !showBars }
-                    )
+                    if (mediaItem.mediaType is MediaType.Video) {
+                        // Determine if this page should be playing
+                        val shouldPlay by remember(pagerState) {
+                            derivedStateOf {
+                                abs(pagerState.currentPageOffsetFraction) < 0.5f
+                                        && pagerState.currentPage == page
+                            }
+                        }
+
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            VideoPlayer(
+                                videoUri = mediaItem.uri.toUri(),
+                                videoName = mediaItem.name,
+                                shouldAutoPlay = shouldPlay,
+                                onControlsVisibilityChanged = { visible ->
+                                    showBars = visible
+                                }
+                            )
+                        }
+                    } else {
+                        ZoomableImage(
+                            mediaItem = mediaItem,
+                            onTap = { showBars = !showBars }
+                        )
+                    }
                 }
             }
 
@@ -234,13 +267,17 @@ fun ImageDetailScreen(
                     // Share button
                     IconButton(onClick = {
                         currentMedia?.let { item ->
+                            val mimeType = when (item.mediaType) {
+                                is MediaType.Video -> "video/*"
+                                is MediaType.Image -> "image/*"
+                            }
                             val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                type = "image/*"
+                                type = mimeType
                                 putExtra(Intent.EXTRA_STREAM, Uri.parse(item.uri))
                                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                             }
                             context.startActivity(
-                                Intent.createChooser(shareIntent, "Share Media via")
+                                Intent.createChooser(shareIntent, "Share via")
                             )
                         }
                     }) {
@@ -281,7 +318,13 @@ fun ImageDetailScreen(
     if (showDeleteDialog && currentMedia != null) {
         AlertDialog(
             onDismissRequest = { showDeleteDialog = false },
-            title = { Text("Delete Image") },
+            title = {
+                val mediaLabel = when (currentMedia.mediaType) {
+                    is MediaType.Video -> "Video"
+                    is MediaType.Image -> "Image"
+                }
+                Text("Delete $mediaLabel")
+            },
             text = {
                 Text(
                     "Are you sure you want to delete \"${currentMedia.name}\"? " +
@@ -450,7 +493,10 @@ private fun ImageInfoContent(
             .padding(24.dp)
     ) {
         Text(
-            text = "Image Details",
+            text = when (image.mediaType) {
+                is MediaType.Video -> "Video Details"
+                is MediaType.Image -> "Image Details"
+            },
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold
         )

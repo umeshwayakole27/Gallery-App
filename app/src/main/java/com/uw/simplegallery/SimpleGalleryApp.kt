@@ -1,6 +1,9 @@
 package com.uw.simplegallery
 
 import android.app.Application
+import coil.ImageLoader
+import coil.ImageLoaderFactory
+import coil.decode.VideoFrameDecoder
 import dagger.hilt.android.HiltAndroidApp
 
 /**
@@ -17,6 +20,21 @@ import dagger.hilt.android.HiltAndroidApp
  * component initialization runs at app startup. Without this, Activities
  * annotated with [@AndroidEntryPoint] will crash with:
  * "Hilt Activity must be attached to an @HiltAndroidApp Application".
+ *
+ * Implements [ImageLoaderFactory] to provide a custom Coil [ImageLoader] with
+ * [VideoFrameDecoder] support, enabling video thumbnail loading in the gallery grid.
+ * Without this, Coil's default ImageLoader cannot decode video frames from
+ * content:// URIs, and video items would appear as blank tiles.
  */
 @HiltAndroidApp(Application::class)
-class SimpleGalleryApp : Hilt_SimpleGalleryApp()
+class SimpleGalleryApp : Hilt_SimpleGalleryApp(), ImageLoaderFactory {
+
+    override fun newImageLoader(): ImageLoader {
+        return ImageLoader.Builder(this)
+            .components {
+                add(VideoFrameDecoder.Factory())
+            }
+            .crossfade(true)
+            .build()
+    }
+}
