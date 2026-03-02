@@ -7,9 +7,9 @@ import com.uw.simplegallery.data.model.MediaItem
 /**
  * Extension functions for managing media item selection in a [SnapshotStateList].
  *
- * Adapted from Tulsi Gallery's Selection.kt. The SimpleGallery app uses a flat
- * grid (no date-grouped sections), so the logic is simplified: items are added
- * or removed directly without section tracking.
+ * Adapted from Tulsi Gallery's Selection.kt. The timeline UI may include date
+ * headers, but selection still tracks only concrete [MediaItem] entries.
+ * Items are added or removed directly without section tracking state.
  *
  * The [SnapshotStateList] itself serves as the selection state — any mutations
  * trigger Compose recomposition automatically.

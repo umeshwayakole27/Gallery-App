@@ -22,6 +22,7 @@ import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -32,6 +33,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -51,6 +53,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -77,6 +80,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.painter.ColorPainter
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
@@ -85,6 +89,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntRect
@@ -97,6 +103,7 @@ import coil.request.ImageRequest
 import com.uw.simplegallery.R
 import com.uw.simplegallery.data.model.MediaItem
 import com.uw.simplegallery.data.model.MediaType
+import com.uw.simplegallery.ui.components.AnimatedFastScrollbar
 import com.uw.simplegallery.ui.selection.GallerySelectionBottomBar
 import com.uw.simplegallery.ui.selection.IsSelectingTopBar
 import com.uw.simplegallery.ui.selection.getAppBarContentTransition
@@ -111,7 +118,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
- * Main gallery screen displaying a grid of image thumbnails with multi-select support.
+ * Main gallery screen displaying a date-grouped timeline grid with multi-select support.
  *
  * Multi-select features (adapted from Tulsi Gallery):
  * - Long-press any item to enter selection mode (with haptic feedback)
@@ -120,6 +127,7 @@ import kotlinx.coroutines.launch
  * - Checkmark overlay on selected items
  * - Selection-mode top bar with count and select-all toggle
  * - Floating bottom bar with Share and Delete actions
+ * - Persistent timeline section label + draggable fast-scrollbar
  * - Back press clears selection
  *
  * Can operate in two modes:
@@ -162,6 +170,7 @@ fun GalleryGridScreen(
     val albumName by viewModel.currentAlbumName.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
+    val timelineUiModel = remember(images) { buildTimelineUiModel(images) }
 
     val snackbarHostState = remember { SnackbarHostState() }
     val isSelecting by remember { derivedStateOf { selectedItemsList.isNotEmpty() } }
@@ -178,6 +187,7 @@ fun GalleryGridScreen(
     // Pinch-to-zoom column count state
     // Column count persists across recompositions but not process death (use rememberSaveable)
     var columnCount by rememberSaveable { mutableIntStateOf(3) }
+    var hasUserAdjustedColumns by rememberSaveable { mutableStateOf(false) }
     // Live pinch scale: applied via graphicsLayer during the gesture for real-time feedback.
     // When the user pinches, this smoothly scales the entire grid visually.
     // When the pinch ends or crosses a column-count threshold, it springs back to 1.0.
@@ -283,83 +293,148 @@ fun GalleryGridScreen(
                     isAlbumMode = isAlbumMode
                 )
             } else {
-                LazyVerticalGrid(
-                    state = gridState,
-                    columns = GridCells.Fixed(columnCount.coerceIn(1, 6)),
-                    // Disable user scroll during drag-select or pinch to prevent gesture conflict
-                    userScrollEnabled = !isDragSelecting.value && !isPinching,
-                    contentPadding = PaddingValues(
-                        start = 4.dp,
-                        end = 4.dp,
-                        top = 4.dp,
-                        bottom = 4.dp + if (isSelecting) 80.dp else extraBottomPadding
-                    ),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                    modifier = Modifier
-                        .fillMaxSize()
-                        // Live pinch scale: visually scales the grid during the pinch gesture
-                        .graphicsLayer {
-                            scaleX = pinchScale.floatValue
-                            scaleY = pinchScale.floatValue
+                BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                    val adaptiveColumnCount = remember(maxWidth) {
+                        (maxWidth / 132.dp).toInt().coerceIn(2, 6)
+                    }
+                    LaunchedEffect(adaptiveColumnCount, hasUserAdjustedColumns) {
+                        if (!hasUserAdjustedColumns) {
+                            columnCount = adaptiveColumnCount
                         }
-                        .pinchToZoomHandler(
-                            columnCount = columnCount,
-                            cumulativeScale = cumulativeScale,
-                            pinchScale = pinchScale,
-                            onColumnCountChange = { newCount ->
-                                columnCount = newCount
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            },
-                            onPinchStart = { isPinching = true },
-                            onPinchEnd = {
-                                isPinching = false
-                                // Spring-animate pinchScale back to 1.0 for a smooth settle
-                                coroutineScope.launch {
-                                    pinchScaleAnimatable.snapTo(pinchScale.floatValue)
-                                    pinchScaleAnimatable.animateTo(
-                                        1f,
-                                        animationSpec = spring(
-                                            dampingRatio = Spring.DampingRatioMediumBouncy,
-                                            stiffness = Spring.StiffnessMedium
+                    }
+                    val effectiveColumnCount = columnCount.coerceIn(1, 6)
+                    val timelineItems = timelineUiModel.items
+                    val currentSectionLabel by remember(gridState, timelineUiModel) {
+                        derivedStateOf {
+                            timelineUiModel.sectionLabelForTimelineIndex(gridState.firstVisibleItemIndex)
+                        }
+                    }
+
+                    LazyVerticalGrid(
+                        state = gridState,
+                        columns = GridCells.Fixed(effectiveColumnCount),
+                        userScrollEnabled = !isDragSelecting.value && !isPinching,
+                        contentPadding = PaddingValues(
+                            start = 4.dp,
+                            end = 4.dp,
+                            top = 4.dp,
+                            bottom = 4.dp + if (isSelecting) 80.dp else extraBottomPadding
+                        ),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                scaleX = pinchScale.floatValue
+                                scaleY = pinchScale.floatValue
+                            }
+                            .pinchToZoomHandler(
+                                currentColumnCount = { columnCount },
+                                cumulativeScale = cumulativeScale,
+                                pinchScale = pinchScale,
+                                onColumnCountChange = { newCount ->
+                                    hasUserAdjustedColumns = true
+                                    columnCount = newCount
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                },
+                                onPinchStart = { isPinching = true },
+                                onPinchEnd = {
+                                    isPinching = false
+                                    coroutineScope.launch {
+                                        pinchScaleAnimatable.snapTo(pinchScale.floatValue)
+                                        pinchScaleAnimatable.animateTo(
+                                            1f,
+                                            animationSpec = spring(
+                                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                stiffness = Spring.StiffnessMedium
+                                            )
                                         )
+                                    }
+                                }
+                            )
+                            .dragSelectionHandler(
+                                state = gridState,
+                                selectedItemsList = selectedItemsList,
+                                allItems = images,
+                                numberOfColumns = effectiveColumnCount,
+                                scrollSpeed = scrollSpeed,
+                                scrollThreshold = with(localDensity) { 40.dp.toPx() },
+                                isDragSelecting = isDragSelecting,
+                                onDragSelectStart = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                }
+                            )
+                    ) {
+                        items(
+                            items = timelineItems,
+                            key = { item ->
+                                when (item) {
+                                    is TimelineItem.Header -> item.key
+                                    is TimelineItem.Photo -> item.mediaItem.id
+                                }
+                            },
+                            span = { item ->
+                                when (item) {
+                                    is TimelineItem.Header -> GridItemSpan(maxLineSpan)
+                                    is TimelineItem.Photo -> GridItemSpan(1)
+                                }
+                            }
+                        ) { item ->
+                            when (item) {
+                                is TimelineItem.Header -> {
+                                    TimelineSectionHeader(
+                                        label = item.label,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 4.dp, vertical = 6.dp)
+                                    )
+                                }
+
+                                is TimelineItem.Photo -> {
+                                    val image = item.mediaItem
+                                    val isItemSelected by remember(selectedItemsList.size) {
+                                        derivedStateOf { selectedItemsList.contains(image) }
+                                    }
+
+                                    SelectableImageGridItem(
+                                        image = image,
+                                        isSelected = isItemSelected,
+                                        isSelectionMode = isSelecting,
+                                        onTap = {
+                                            if (isSelecting) {
+                                                selectedItemsList.toggleItem(image)
+                                            } else {
+                                                onImageClick(image.id)
+                                            }
+                                        }
                                     )
                                 }
                             }
-                        )
-                        .dragSelectionHandler(
-                            state = gridState,
-                            selectedItemsList = selectedItemsList,
-                            allItems = images,
-                            scrollSpeed = scrollSpeed,
-                            scrollThreshold = with(localDensity) { 40.dp.toPx() },
-                            isDragSelecting = isDragSelecting,
-                            onDragSelectStart = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            }
-                        )
-                ) {
-                    items(
-                        items = images,
-                        key = { it.id }
-                    ) { image ->
-                        val isItemSelected by remember(selectedItemsList.size) {
-                            derivedStateOf { selectedItemsList.contains(image) }
                         }
+                    }
 
-                        SelectableImageGridItem(
-                            image = image,
-                            isSelected = isItemSelected,
-                            isSelectionMode = isSelecting,
-                            onTap = {
-                                if (isSelecting) {
-                                    selectedItemsList.toggleItem(image)
-                                } else {
-                                    onImageClick(image.id)
-                                }
-                            }
+                    if (currentSectionLabel.isNotBlank()) {
+                        CurrentTimelineSectionChip(
+                            label = currentSectionLabel,
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .padding(start = 12.dp, top = 10.dp)
                         )
                     }
+
+                    AnimatedFastScrollbar(
+                        state = gridState,
+                        totalItems = timelineItems.size,
+                        itemIndexForFraction = timelineUiModel::timelineIndexForFraction,
+                        sectionLabelForIndex = timelineUiModel::sectionLabelForTimelineIndex,
+                        sectionLabelForFraction = timelineUiModel::sectionLabelForFraction,
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .padding(
+                                top = 8.dp,
+                                bottom = if (isSelecting) 88.dp else extraBottomPadding + 8.dp
+                            )
+                    )
                 }
             }
 
@@ -379,6 +454,41 @@ fun GalleryGridScreen(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun TimelineSectionHeader(
+    label: String,
+    modifier: Modifier = Modifier
+) {
+    Text(
+        text = label,
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.onSurface,
+        modifier = modifier.semantics { heading() }
+    )
+}
+
+@Composable
+private fun CurrentTimelineSectionChip(
+    label: String,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.widthIn(min = 88.dp, max = 220.dp),
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        tonalElevation = 2.dp,
+        shadowElevation = 2.dp
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+        )
     }
 }
 
@@ -435,11 +545,15 @@ private fun SelectableImageGridItem(
             shape = MaterialTheme.shapes.small,
             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
         ) {
+            val placeholderPainter = ColorPainter(MaterialTheme.colorScheme.surfaceVariant)
+            val errorPainter = ColorPainter(MaterialTheme.colorScheme.surfaceContainerHighest)
             AsyncImage(
                 model = ImageRequest.Builder(LocalContext.current)
                     .data(image.uri.toString())
                     .crossfade(true)
                     .build(),
+                placeholder = placeholderPainter,
+                error = errorPainter,
                 contentDescription = image.name,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize()
@@ -528,7 +642,7 @@ private const val MIN_PINCH_SCALE = 0.75f
  * calls [onColumnCountChange] and resets both scales. When the gesture ends,
  * calls [onPinchEnd] so the caller can spring-animate [pinchScale] back to 1.0.
  *
- * @param columnCount Current column count
+ * @param currentColumnCount Function returning the latest column count
  * @param cumulativeScale Mutable float state tracking cumulative scale within a gesture
  * @param pinchScale Mutable float state controlling the live visual scale of the grid
  * @param onColumnCountChange Callback with the new column count
@@ -536,13 +650,13 @@ private const val MIN_PINCH_SCALE = 0.75f
  * @param onPinchEnd Called when the pinch gesture ends (for spring settle animation)
  */
 private fun Modifier.pinchToZoomHandler(
-    columnCount: Int,
+    currentColumnCount: () -> Int,
     cumulativeScale: MutableFloatState,
     pinchScale: MutableFloatState,
     onColumnCountChange: (Int) -> Unit,
     onPinchStart: () -> Unit = {},
     onPinchEnd: () -> Unit = {}
-) = pointerInput(columnCount) {
+) = pointerInput(Unit) {
     awaitEachGesture {
         // Wait for the first pointer down
         awaitFirstDown(requireUnconsumed = false)
@@ -567,6 +681,8 @@ private fun Modifier.pinchToZoomHandler(
                     val newVisualScale = (pinchScale.floatValue * zoom)
                         .coerceIn(MIN_PINCH_SCALE, MAX_PINCH_SCALE)
                     pinchScale.floatValue = newVisualScale
+
+                    val columnCount = currentColumnCount().coerceIn(MIN_COLUMNS, MAX_COLUMNS)
 
                     // Zoom in (pinch out) → fewer columns
                     if (cumulativeScale.floatValue > ZOOM_IN_THRESHOLD && columnCount > MIN_COLUMNS) {
@@ -620,6 +736,7 @@ private fun Modifier.pinchToZoomHandler(
  * @param state The [LazyGridState] of the grid
  * @param selectedItemsList The selection state list
  * @param allItems All items displayed in the grid (for range sub-listing)
+ * @param numberOfColumns Current number of photo columns in the grid
  * @param scrollSpeed Mutable float state controlling auto-scroll speed
  * @param scrollThreshold Distance in pixels from viewport edge to trigger auto-scroll
  * @param isDragSelecting Mutable state tracking whether a drag-select is in progress
@@ -629,22 +746,17 @@ private fun Modifier.dragSelectionHandler(
     state: LazyGridState,
     selectedItemsList: SnapshotStateList<MediaItem>,
     allItems: List<MediaItem>,
+    numberOfColumns: Int,
     scrollSpeed: MutableFloatState,
     scrollThreshold: Float,
     isDragSelecting: MutableState<Boolean>,
     onDragSelectStart: () -> Unit = {}
-) = pointerInput(allItems) {
+) = pointerInput(allItems, numberOfColumns) {
     if (allItems.isEmpty()) return@pointerInput
 
     var initialIndex: Int? = null
     var currentIndex: Int? = null
     var isSelectingMode = true // true = drag selects; false = drag deselects
-
-    // Determine grid column count from visible items
-    val itemWidth = state.layoutInfo.visibleItemsInfo.firstOrNull()?.size?.width
-    val numberOfColumns = itemWidth?.let {
-        (state.layoutInfo.viewportSize.width / it).coerceAtLeast(1)
-    } ?: 3
 
     detectDragGesturesAfterLongPress(
         onDragStart = { offset ->
