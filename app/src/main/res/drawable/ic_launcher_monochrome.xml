@@ -1,0 +1,60 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    
+    <!-- Flower Group: Centered at 54,54 -->
+    <group
+        android:translateX="54"
+        android:translateY="54">
+        
+        <!-- Petals: 8 petals rotated around the center -->
+        <!-- Each group handle rotation for its child path -->
+        <group android:rotation="0">
+            <path
+                android:fillColor="#FFFFFF"
+                android:pathData="M0,-8 Q10,-8 10,-22 Q10,-36 0,-36 Q-10,-36 -10,-22 Q-10,-8 0,-8 Z" />
+        </group>
+        <group android:rotation="45">
+            <path
+                android:fillColor="#FFFFFF"
+                android:pathData="M0,-8 Q10,-8 10,-22 Q10,-36 0,-36 Q-10,-36 -10,-22 Q-10,-8 0,-8 Z" />
+        </group>
+        <group android:rotation="90">
+            <path
+                android:fillColor="#FFFFFF"
+                android:pathData="M0,-8 Q10,-8 10,-22 Q10,-36 0,-36 Q-10,-36 -10,-22 Q-10,-8 0,-8 Z" />
+        </group>
+        <group android:rotation="135">
+            <path
+                android:fillColor="#FFFFFF"
+                android:pathData="M0,-8 Q10,-8 10,-22 Q10,-36 0,-36 Q-10,-36 -10,-22 Q-10,-8 0,-8 Z" />
+        </group>
+        <group android:rotation="180">
+            <path
+                android:fillColor="#FFFFFF"
+                android:pathData="M0,-8 Q10,-8 10,-22 Q10,-36 0,-36 Q-10,-36 -10,-22 Q-10,-8 0,-8 Z" />
+        </group>
+        <group android:rotation="225">
+            <path
+                android:fillColor="#FFFFFF"
+                android:pathData="M0,-8 Q10,-8 10,-22 Q10,-36 0,-36 Q-10,-36 -10,-22 Q-10,-8 0,-8 Z" />
+        </group>
+        <group android:rotation="270">
+            <path
+                android:fillColor="#FFFFFF"
+                android:pathData="M0,-8 Q10,-8 10,-22 Q10,-36 0,-36 Q-10,-36 -10,-22 Q-10,-8 0,-8 Z" />
+        </group>
+        <group android:rotation="315">
+            <path
+                android:fillColor="#FFFFFF"
+                android:pathData="M0,-8 Q10,-8 10,-22 Q10,-36 0,-36 Q-10,-36 -10,-22 Q-10,-8 0,-8 Z" />
+        </group>
+
+        <!-- Central Circle -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M0,0m-9,0a9,9 0,1 1,18 0a9,9 0,1 1,-18 0" />
+    </group>
+</vector>

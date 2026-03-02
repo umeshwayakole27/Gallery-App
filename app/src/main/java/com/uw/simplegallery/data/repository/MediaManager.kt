@@ -58,6 +58,8 @@ class MediaManager @Inject constructor(
             MediaStore.Files.FileColumns.DATA,
             MediaStore.Files.FileColumns.MIME_TYPE,
             MediaStore.Files.FileColumns.DATE_TAKEN,
+            MediaStore.Files.FileColumns.DATE_ADDED,
+            MediaStore.Files.FileColumns.DATE_MODIFIED,
             MediaStore.Files.FileColumns.SIZE,
             MediaStore.Files.FileColumns.MEDIA_TYPE,
             MediaStore.Files.FileColumns.RELATIVE_PATH,
@@ -71,7 +73,8 @@ class MediaManager @Inject constructor(
             MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO.toString()
         )
 
-        val sortOrder = "${MediaStore.Files.FileColumns.DATE_TAKEN} DESC"
+        // Sort by date taken, adding added/modified as secondary sorts for consistent results
+        val sortOrder = "${MediaStore.Files.FileColumns.DATE_TAKEN} DESC, ${MediaStore.Files.FileColumns.DATE_MODIFIED} DESC"
 
         val queryUri = MediaStore.Files.getContentUri("external")
 
@@ -91,6 +94,10 @@ class MediaManager @Inject constructor(
                 cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MIME_TYPE)
             val dateTakenColumn =
                 cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_TAKEN)
+            val dateAddedColumn =
+                cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_ADDED)
+            val dateModifiedColumn =
+                cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_MODIFIED)
             val sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.SIZE)
             val mediaTypeColumn =
                 cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MEDIA_TYPE)
@@ -104,7 +111,12 @@ class MediaManager @Inject constructor(
                 val name = cursor.getString(nameColumn)
                 val path = cursor.getString(pathColumn)
                 val mimeType = cursor.getString(mimeTypeColumn)
+                
+                // Try DATE_TAKEN (millis), fallback to DATE_MODIFIED (secs), then DATE_ADDED (secs)
                 val dateTaken = cursor.getLongOrNull(dateTakenColumn)
+                    ?: cursor.getLongOrNull(dateModifiedColumn)?.let { it * 1000 }
+                    ?: cursor.getLongOrNull(dateAddedColumn)?.let { it * 1000 }
+                
                 val size = cursor.getLongOrNull(sizeColumn)
                 val mediaTypeValue = cursor.getInt(mediaTypeColumn)
                 val relativePath = cursor.getString(relativePathColumn)

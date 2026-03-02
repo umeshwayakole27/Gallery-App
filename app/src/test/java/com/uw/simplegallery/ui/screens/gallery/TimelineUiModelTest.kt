@@ -69,9 +69,11 @@ class TimelineUiModelTest {
             id = id,
             name = "img_$id.jpg",
             uri = "content://media/$id",
+            mimeType = "image/jpeg",
             dateTaken = dateTaken,
             mediaType = MediaType.Image,
             folderName = "Camera",
+            path = "/storage/emulated/0/DCIM/Camera/img_$id.jpg",
             size = 1_024L
         )
     }
