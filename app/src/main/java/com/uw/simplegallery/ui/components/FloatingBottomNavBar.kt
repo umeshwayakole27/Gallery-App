@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
@@ -97,25 +98,15 @@ fun floatingNavBarTotalHeight(): Dp {
 }
 
 /**
- * A floating pill-shaped bottom navigation bar, adapted from the Tulsi Gallery app.
+ * A reusable floating pill-shaped container, adapted from the Tulsi Gallery app.
  *
- * Features:
- * - Pill-shaped container with rounded corners and elevation shadow
- * - Animated color transitions for selected/unselected states
- * - Circular selection indicator behind the active tab icon
- * - Filled/outlined icon switching on selection
- * - Gesture vs button navigation aware padding
- * - Only the pill itself intercepts touches; transparent areas pass through
- *
- * @param tabs List of navigation tabs to display
- * @param selectedRoute The route of the currently selected tab
- * @param onTabSelected Callback when a tab is tapped
+ * @param modifier Modifier for the outer container
+ * @param content The content to display inside the pill (typically a Row)
  */
 @Composable
-fun FloatingBottomNavBar(
-    tabs: List<FloatingNavTab>,
-    selectedRoute: String,
-    onTabSelected: (FloatingNavTab) -> Unit
+fun FloatingPill(
+    modifier: Modifier = Modifier,
+    content: @Composable RowScope.() -> Unit
 ) {
     val context = LocalContext.current
     val isGestureNav = remember { isGestureNavigationEnabled(context.resources) }
@@ -128,8 +119,6 @@ fun FloatingBottomNavBar(
         16.dp
     }
 
-    // wrapContentHeight so the outer Box only occupies the pill's actual space
-    // and does NOT stretch to fill, preventing it from stealing touches
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -139,10 +128,11 @@ fun FloatingBottomNavBar(
                 end = 12.dp,
                 top = 16.dp,
                 bottom = additionalBottomPadding
-            ),
+            )
+            .then(modifier),
         contentAlignment = Alignment.Center
     ) {
-        // Floating pill-shaped bar — only this receives touches
+        // Floating pill-shaped bar
         Box(
             modifier = Modifier
                 .height(76.dp)
@@ -164,16 +154,41 @@ fun FloatingBottomNavBar(
                     .fillMaxSize()
                     .padding(vertical = 7.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceEvenly
-            ) {
-                tabs.forEach { tab ->
-                    FloatingNavBarItem(
-                        tab = tab,
-                        isSelected = selectedRoute == tab.route,
-                        onClick = { onTabSelected(tab) }
-                    )
-                }
-            }
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                content = content
+            )
+        }
+    }
+}
+
+/**
+ * A floating pill-shaped bottom navigation bar, adapted from the Tulsi Gallery app.
+ *
+ * Features:
+ * - Pill-shaped container with rounded corners and elevation shadow
+ * - Animated color transitions for selected/unselected states
+ * - Circular selection indicator behind the active tab icon
+ * - Filled/outlined icon switching on selection
+ * - Gesture vs button navigation aware padding
+ * - Only the pill itself intercepts touches; transparent areas pass through
+ *
+ * @param tabs List of navigation tabs to display
+ * @param selectedRoute The route of the currently selected tab
+ * @param onTabSelected Callback when a tab is tapped
+ */
+@Composable
+fun FloatingBottomNavBar(
+    tabs: List<FloatingNavTab>,
+    selectedRoute: String,
+    onTabSelected: (FloatingNavTab) -> Unit
+) {
+    FloatingPill {
+        tabs.forEach { tab ->
+            FloatingNavBarItem(
+                tab = tab,
+                isSelected = selectedRoute == tab.route,
+                onClick = { onTabSelected(tab) }
+            )
         }
     }
 }

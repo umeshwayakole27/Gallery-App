@@ -50,4 +50,13 @@ interface MediaRepository {
      * @return true if creation was successful, false otherwise
      */
     suspend fun createAlbum(folderName: String): Boolean
+
+    /**
+     * Renames a media item by its ID.
+     *
+     * @param id The ID of the media item
+     * @param newName The new name for the media item
+     * @return true if successful
+     */
+    suspend fun renameMediaItem(id: Long, newName: String): Boolean
 }

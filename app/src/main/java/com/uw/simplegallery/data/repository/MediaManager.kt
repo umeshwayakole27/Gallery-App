@@ -55,6 +55,8 @@ class MediaManager @Inject constructor(
         val projection = arrayOf(
             MediaStore.Files.FileColumns._ID,
             MediaStore.Files.FileColumns.DISPLAY_NAME,
+            MediaStore.Files.FileColumns.DATA,
+            MediaStore.Files.FileColumns.MIME_TYPE,
             MediaStore.Files.FileColumns.DATE_TAKEN,
             MediaStore.Files.FileColumns.SIZE,
             MediaStore.Files.FileColumns.MEDIA_TYPE,
@@ -83,6 +85,10 @@ class MediaManager @Inject constructor(
             val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID)
             val nameColumn =
                 cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DISPLAY_NAME)
+            val pathColumn =
+                cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATA)
+            val mimeTypeColumn =
+                cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MIME_TYPE)
             val dateTakenColumn =
                 cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_TAKEN)
             val sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.SIZE)
@@ -96,6 +102,8 @@ class MediaManager @Inject constructor(
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idColumn)
                 val name = cursor.getString(nameColumn)
+                val path = cursor.getString(pathColumn)
+                val mimeType = cursor.getString(mimeTypeColumn)
                 val dateTaken = cursor.getLongOrNull(dateTakenColumn)
                 val size = cursor.getLongOrNull(sizeColumn)
                 val mediaTypeValue = cursor.getInt(mediaTypeColumn)
@@ -108,16 +116,23 @@ class MediaManager @Inject constructor(
                     else -> continue
                 }
 
-                val contentUri = MediaStore.Files.getContentUri("external", id)
+                val baseUri = if (mediaType == MediaType.Image) {
+                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                } else {
+                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                }
+                val contentUri = ContentUris.withAppendedId(baseUri, id)
 
                 mediaItems.add(
                     MediaItem(
                         id = id,
                         name = name,
                         uri = contentUri.toString(),
+                        mimeType = mimeType,
                         dateTaken = dateTaken,
                         mediaType = mediaType,
                         folderName = relativePath,
+                        path = path,
                         size = size,
                         duration = if (mediaType == MediaType.Video) duration else null
                     )
@@ -541,6 +556,39 @@ class MediaManager @Inject constructor(
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error creating album: ${e.message}", e)
+            false
+        }
+    }
+
+    /**
+     * Renames a media item in MediaStore.
+     *
+     * @param id The MediaStore ID of the item
+     * @param newName The new display name (including extension)
+     * @return true if successful
+     */
+    suspend fun renameMediaItem(id: Long, newName: String): Boolean = withContext(Dispatchers.IO) {
+        return@withContext try {
+            val (validIds, validUris) = filterExistingUris(listOf(id))
+            if (validIds.isEmpty()) return@withContext false
+
+            val uri = validUris[0]
+            val contentValues = ContentValues().apply {
+                put(MediaStore.Files.FileColumns.DISPLAY_NAME, newName)
+            }
+
+            val rows = context.contentResolver.update(uri, contentValues, null, null)
+            if (rows > 0) {
+                // Update cache
+                _allMediaItems.value = _allMediaItems.value.map {
+                    if (it.id == id) it.copy(name = newName) else it
+                }
+                true
+            } else {
+                false
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error renaming media item: ${e.message}", e)
             false
         }
     }

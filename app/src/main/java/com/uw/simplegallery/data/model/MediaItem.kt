@@ -19,9 +19,11 @@ data class MediaItem(
     val id: Long,
     val name: String,
     val uri: String,
+    val mimeType: String?,
     val dateTaken: Long?,
     val mediaType: MediaType,
     val folderName: String?,
+    val path: String?,
     val size: Long?,
     val duration: Long? = null
 )

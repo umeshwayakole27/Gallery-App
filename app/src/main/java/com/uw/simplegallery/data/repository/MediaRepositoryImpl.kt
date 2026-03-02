@@ -49,4 +49,8 @@ class MediaRepositoryImpl @Inject constructor(
     override suspend fun createAlbum(folderName: String): Boolean {
         return mediaManager.createAlbum(folderName)
     }
+
+    override suspend fun renameMediaItem(id: Long, newName: String): Boolean {
+        return mediaManager.renameMediaItem(id, newName)
+    }
 }

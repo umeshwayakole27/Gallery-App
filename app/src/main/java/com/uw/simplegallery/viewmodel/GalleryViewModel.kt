@@ -308,6 +308,30 @@ class GalleryViewModel @Inject constructor(
     }
 
     /**
+     * Renames a media item with the given ID to a new name.
+     * Refreshes media and selected item on success.
+     *
+     * @param id The MediaStore ID of the item to rename
+     * @param newName The new name for the media item
+     */
+    fun renameMedia(id: Long, newName: String) {
+        viewModelScope.launch {
+            try {
+                val success = mediaRepository.renameMediaItem(id, newName)
+                if (success) {
+                    loadMedia()
+                    // Re-select to update currentMedia in detail screen
+                    selectMedia(id)
+                } else {
+                    _errorMessage.value = "Failed to rename media"
+                }
+            } catch (e: Exception) {
+                _errorMessage.value = e.message ?: "Error renaming media"
+            }
+        }
+    }
+
+    /**
      * Clears the current error message.
      */
     fun clearError() {

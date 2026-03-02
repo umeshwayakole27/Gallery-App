@@ -3,32 +3,44 @@ package com.uw.simplegallery.ui.screens.detail
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Search
+import com.uw.simplegallery.ui.components.searchWithGoogleLens
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -52,23 +64,32 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import androidx.compose.ui.res.painterResource
+import androidx.core.content.FileProvider
+import java.io.File
+import com.uw.simplegallery.R
 import com.uw.simplegallery.data.model.MediaItem
 import com.uw.simplegallery.data.model.MediaType
+import com.uw.simplegallery.ui.components.FloatingPill
 import com.uw.simplegallery.ui.screens.video.VideoPlayer
 import com.uw.simplegallery.viewmodel.GalleryViewModel
 import kotlinx.coroutines.launch
+import android.widget.Toast
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -130,12 +151,9 @@ fun ImageDetailScreen(
             }
     }
 
-    // Navigate back if the current media item was deleted (e.g., after API 30+ system dialog approval
-    // or direct MANAGE_MEDIA deletion). When the media list refreshes after deletion, the item is
-    // removed from the list. If the list becomes empty or the originally viewed item is no longer
-    // present, we navigate back so the user isn't stuck on a stale/empty detail screen.
+    // Navigate back if the current media item was deleted
     LaunchedEffect(imageList) {
-        if (imageList.isEmpty() || imageList.none { it.id == imageId }) {
+        if (imageList.isEmpty()) {
             onNavigateBack()
         }
     }
@@ -144,6 +162,8 @@ fun ImageDetailScreen(
     var showBars by remember { mutableStateOf(true) }
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showInfoSheet by remember { mutableStateOf(false) }
+    var showRenameDialog by remember { mutableStateOf(false) }
+    var newName by remember { mutableStateOf("") }
     val sheetState = rememberModalBottomSheetState()
 
     Box(
@@ -159,7 +179,7 @@ fun ImageDetailScreen(
                 color = Color.White
             )
         } else {
-            // Determine if current page is a video (to disable pager swipe for gesture conflicts)
+            // Determine if current page is a video
             val isCurrentPageVideo by remember {
                 derivedStateOf {
                     imageList.getOrNull(pagerState.currentPage)?.mediaType is MediaType.Video
@@ -206,14 +226,20 @@ fun ImageDetailScreen(
             // Top bar with back button and image name
             AnimatedVisibility(
                 visible = showBars,
-                enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
-                exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
+                enter = slideInVertically(
+                    initialOffsetY = { -it },
+                    animationSpec = tween(350)
+                ) + fadeIn(),
+                exit = slideOutVertically(
+                    targetOffsetY = { -it },
+                    animationSpec = tween(400)
+                ) + fadeOut(),
                 modifier = Modifier.align(Alignment.TopCenter)
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(Color.Black.copy(alpha = 0.6f))
+                        .background(Color.Black.copy(alpha = 0.4f))
                         .statusBarsPadding()
                         .padding(horizontal = 4.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -229,12 +255,20 @@ fun ImageDetailScreen(
                         modifier = Modifier
                             .weight(1f)
                             .padding(horizontal = 8.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable {
+                                currentMedia?.let {
+                                    newName = it.name
+                                    showRenameDialog = true
+                                }
+                            }
+                            .padding(4.dp)
                     ) {
                         Text(
                             text = currentMedia?.name ?: "",
                             color = Color.White,
                             fontSize = 16.sp,
-                            fontWeight = FontWeight.Medium,
+                            fontWeight = FontWeight.Bold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -246,67 +280,105 @@ fun ImageDetailScreen(
                             )
                         }
                     }
+
+                    // Google Lens button (only for images)
+                    if (currentMedia?.mediaType is MediaType.Image) {
+                        IconButton(onClick = {
+                            currentMedia.let {
+                                searchWithGoogleLens(it.uri, context)
+                            }
+                        }) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.lens),
+                                contentDescription = "Search with Google Lens",
+                                tint = Color.Unspecified,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                    }
                 }
             }
 
-            // Bottom bar with actions
+            // Bottom bar with actions (Floating Pill)
             AnimatedVisibility(
                 visible = showBars,
-                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+                enter = slideInVertically(
+                    initialOffsetY = { it },
+                    animationSpec = tween(250)
+                ) + fadeIn(),
+                exit = slideOutVertically(
+                    targetOffsetY = { it },
+                    animationSpec = tween(300)
+                ) + fadeOut(),
                 modifier = Modifier.align(Alignment.BottomCenter)
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Color.Black.copy(alpha = 0.6f))
-                        .navigationBarsPadding()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly
+                FloatingPill(
+                    modifier = Modifier.padding(bottom = 8.dp)
                 ) {
                     // Share button
-                    IconButton(onClick = {
-                        currentMedia?.let { item ->
-                            val mimeType = when (item.mediaType) {
-                                is MediaType.Video -> "video/*"
-                                is MediaType.Image -> "image/*"
+                    DetailBottomBarItem(
+                        text = "Share",
+                        icon = Icons.Default.Share,
+                        onClick = {
+                            currentMedia?.let { item ->
+                                val mimeType = when (item.mediaType) {
+                                    is MediaType.Video -> "video/*"
+                                    is MediaType.Image -> "image/*"
+                                }
+                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = mimeType
+                                    putExtra(Intent.EXTRA_STREAM, Uri.parse(item.uri))
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                context.startActivity(
+                                    Intent.createChooser(shareIntent, "Share via")
+                                )
                             }
-                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                type = mimeType
-                                putExtra(Intent.EXTRA_STREAM, Uri.parse(item.uri))
-                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            }
-                            context.startActivity(
-                                Intent.createChooser(shareIntent, "Share via")
-                            )
                         }
-                    }) {
-                        Icon(
-                            imageVector = Icons.Default.Share,
-                            contentDescription = "Share image",
-                            tint = Color.White
-                        )
-                    }
+                    )
+
+                    // Edit button
+                    DetailBottomBarItem(
+                        text = "Edit with",
+                        icon = Icons.Default.Edit,
+                        onClick = {
+                            currentMedia?.let { item ->
+                                // Use the generic MIME type to match more editing apps
+                                val genericMimeType = when (item.mediaType) {
+                                    is MediaType.Video -> "video/*"
+                                    is MediaType.Image -> "image/*"
+                                }
+
+                                val editUri = Uri.parse(item.uri)
+
+                                // ACTION_EDIT is the correct action for editing.
+                                // It should now work because we've added <queries> to the manifest.
+                                val editIntent = Intent(Intent.ACTION_EDIT).apply {
+                                    setDataAndType(editUri, genericMimeType)
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                try {
+                                    context.startActivity(editIntent)
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "No app found to edit this file", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
+                    )
 
                     // Delete button
-                    IconButton(onClick = {
-                        showDeleteDialog = true
-                    }) {
-                        Icon(
-                            imageVector = Icons.Default.Delete,
-                            contentDescription = "Delete image",
-                            tint = Color.White
-                        )
-                    }
+                    DetailBottomBarItem(
+                        text = "Delete",
+                        icon = Icons.Default.Delete,
+                        onClick = { showDeleteDialog = true }
+                    )
 
                     // Info button
-                    IconButton(onClick = { showInfoSheet = true }) {
-                        Icon(
-                            imageVector = Icons.Default.Info,
-                            contentDescription = "Image info",
-                            tint = Color.White
-                        )
-                    }
+                    DetailBottomBarItem(
+                        text = "Info",
+                        icon = Icons.Default.Info,
+                        onClick = { showInfoSheet = true }
+                    )
                 }
             }
         }
@@ -354,6 +426,43 @@ fun ImageDetailScreen(
         )
     }
 
+    // Rename dialog
+    if (showRenameDialog && currentMedia != null) {
+        AlertDialog(
+            onDismissRequest = { showRenameDialog = false },
+            title = { Text("Rename Media") },
+            text = {
+                Column {
+                    Text("Enter a new name for the file:", style = MaterialTheme.typography.bodyMedium)
+                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(8.dp))
+                    androidx.compose.material3.OutlinedTextField(
+                        value = newName,
+                        onValueChange = { newName = it },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (newName.isNotBlank() && newName != currentMedia.name) {
+                            viewModel.renameMedia(currentMedia.id, newName)
+                        }
+                        showRenameDialog = false
+                    }
+                ) {
+                    Text("Rename")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRenameDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     // Info bottom sheet
     if (showInfoSheet && currentMedia != null) {
         ModalBottomSheet(
@@ -370,6 +479,42 @@ fun ImageDetailScreen(
                 }
             )
         }
+    }
+}
+
+/**
+ * Individual action item for the detail screen's floating bottom bar.
+ */
+@Composable
+private fun DetailBottomBarItem(
+    text: String,
+    icon: ImageVector,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .width(70.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = text,
+            tint = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.size(24.dp)
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center
+        )
     }
 }
 
