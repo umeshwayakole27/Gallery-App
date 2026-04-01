@@ -1,5 +1,8 @@
 package com.uw.simplegallery.ui.screens.detail
 
+import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
@@ -43,6 +46,8 @@ import androidx.compose.material.icons.filled.Search
 import com.uw.simplegallery.ui.components.searchWithGoogleLens
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -163,6 +168,7 @@ fun ImageDetailScreen(
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showInfoSheet by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
+    var showOverflowMenu by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
     val sheetState = rememberModalBottomSheetState()
 
@@ -294,6 +300,30 @@ fun ImageDetailScreen(
                                 tint = Color.Unspecified,
                                 modifier = Modifier.size(24.dp)
                             )
+                        }
+
+                        Box {
+                            IconButton(onClick = { showOverflowMenu = true }) {
+                                Icon(
+                                    imageVector = Icons.Default.MoreVert,
+                                    contentDescription = "More actions",
+                                    tint = Color.White
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = showOverflowMenu,
+                                onDismissRequest = { showOverflowMenu = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Use as") },
+                                    onClick = {
+                                        showOverflowMenu = false
+                                        currentMedia?.let { mediaItem ->
+                                            launchUseAsChooser(context, mediaItem)
+                                        }
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -478,6 +508,37 @@ fun ImageDetailScreen(
                     }
                 }
             )
+        }
+    }
+}
+
+private fun launchUseAsChooser(context: Context, mediaItem: MediaItem) {
+    val mediaUri = Uri.parse(mediaItem.uri)
+    val mimeType = mediaItem.mimeType?.takeIf { it.startsWith("image/") } ?: "image/*"
+
+    val useAsIntent = Intent(Intent.ACTION_ATTACH_DATA).apply {
+        addCategory(Intent.CATEGORY_DEFAULT)
+        setDataAndType(mediaUri, mimeType)
+        putExtra("mimeType", mimeType)
+        putExtra(Intent.EXTRA_STREAM, mediaUri)
+        clipData = ClipData.newUri(context.contentResolver, mediaItem.name, mediaUri)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+
+    try {
+        context.startActivity(Intent.createChooser(useAsIntent, "Use as"))
+    } catch (_: ActivityNotFoundException) {
+        val setWallpaperIntent = Intent(Intent.ACTION_SET_WALLPAPER).apply {
+            setDataAndType(mediaUri, mimeType)
+            putExtra(Intent.EXTRA_STREAM, mediaUri)
+            clipData = ClipData.newUri(context.contentResolver, mediaItem.name, mediaUri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+
+        try {
+            context.startActivity(Intent.createChooser(setWallpaperIntent, "Set wallpaper"))
+        } catch (_: ActivityNotFoundException) {
+            Toast.makeText(context, "No app found for Use as", Toast.LENGTH_SHORT).show()
         }
     }
 }
