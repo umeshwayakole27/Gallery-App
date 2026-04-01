@@ -2,29 +2,32 @@ package com.uw.simplegallery.data.repository
 
 import com.uw.simplegallery.data.model.AlbumItem
 import com.uw.simplegallery.data.model.MediaItem
-import kotlinx.coroutines.flow.Flow
-
 
 interface MediaRepository {
     /**
-     * Returns a [Flow] of all media items (images and videos) from local storage.
-     * Triggers a fresh load from MediaStore on each collection.
+     * Returns all media items (images and videos) from local storage.
+     *
+     * @param forceRefresh Whether to force a fresh load from MediaStore even when
+     * cached data is available in memory.
      */
-    fun getAllMediaItems(): Flow<List<MediaItem>>
+    suspend fun getAllMediaItems(forceRefresh: Boolean = true): List<MediaItem>
 
     /**
-     * Returns a [Flow] of albums derived by grouping media items by folder name.
+     * Returns albums derived by grouping media items by folder name.
+     *
+     * @param forceRefreshMedia Whether to force a fresh MediaStore load before
+     * grouping albums.
      * Includes a synthetic "All Photos" album at the beginning.
      */
-    fun getAlbums(): Flow<List<AlbumItem>>
+    suspend fun getAlbums(forceRefreshMedia: Boolean = false): List<AlbumItem>
 
     /**
      * Searches media items whose display name contains the given [query].
      *
      * @param query The search term to filter by name
-     * @return A [Flow] of matching media items
+     * @return Matching media items
      */
-    fun searchMedia(query: String): Flow<List<MediaItem>>
+    suspend fun searchMedia(query: String): List<MediaItem>
 
     /**
      * Deletes media items by their MediaStore IDs. On API 30+ this may

@@ -19,8 +19,9 @@ import com.uw.simplegallery.data.model.MediaItem
 
 /** Toggle the selection of a single item. Returns true if the item is now selected. */
 fun SnapshotStateList<MediaItem>.toggleItem(item: MediaItem): Boolean {
-    return if (contains(item)) {
-        remove(item)
+    val existingIndex = indexOfFirst { it.id == item.id }
+    return if (existingIndex >= 0) {
+        removeAt(existingIndex)
         false
     } else {
         add(item)
@@ -30,19 +31,26 @@ fun SnapshotStateList<MediaItem>.toggleItem(item: MediaItem): Boolean {
 
 /** Select a single item if not already selected. */
 fun SnapshotStateList<MediaItem>.selectItem(item: MediaItem) {
-    if (!contains(item)) add(item)
+    if (none { it.id == item.id }) {
+        add(item)
+    }
 }
 
 /** Unselect a single item if present. */
 fun SnapshotStateList<MediaItem>.unselectItem(item: MediaItem) {
-    remove(item)
+    val existingIndex = indexOfFirst { it.id == item.id }
+    if (existingIndex >= 0) {
+        removeAt(existingIndex)
+    }
 }
 
 /**
  * Select all items from the given list that are not already selected.
  */
 fun SnapshotStateList<MediaItem>.selectAll(items: List<MediaItem>) {
-    val toAdd = items.filter { !contains(it) }
+    if (items.isEmpty()) return
+    val selectedIds = asSequence().map { it.id }.toHashSet()
+    val toAdd = items.filter { it.id !in selectedIds }
     addAll(toAdd)
 }
 
@@ -50,22 +58,27 @@ fun SnapshotStateList<MediaItem>.selectAll(items: List<MediaItem>) {
  * Unselect all items from the given list.
  */
 fun SnapshotStateList<MediaItem>.unselectAll(items: List<MediaItem>) {
-    removeAll(items.toSet())
+    if (items.isEmpty()) return
+    val idsToRemove = items.asSequence().map { it.id }.toHashSet()
+    removeAll { it.id in idsToRemove }
 }
 
 /**
  * Returns true if every item in [items] is currently selected.
  */
 fun SnapshotStateList<MediaItem>.allSelected(items: List<MediaItem>): Boolean {
-    return items.isNotEmpty() && items.all { contains(it) }
+    if (items.isEmpty()) return false
+    val selectedIds = asSequence().map { it.id }.toHashSet()
+    return items.all { it.id in selectedIds }
 }
 
 // ── AlbumItem selection ─────────────────────────────────────────────────
 
 /** Toggle the selection of a single album. Returns true if the album is now selected. */
 fun SnapshotStateList<AlbumItem>.toggleAlbum(album: AlbumItem): Boolean {
-    return if (contains(album)) {
-        remove(album)
+    val existingIndex = indexOfFirst { it.id == album.id }
+    return if (existingIndex >= 0) {
+        removeAt(existingIndex)
         false
     } else {
         add(album)
@@ -75,19 +88,26 @@ fun SnapshotStateList<AlbumItem>.toggleAlbum(album: AlbumItem): Boolean {
 
 /** Select a single album if not already selected. */
 fun SnapshotStateList<AlbumItem>.selectAlbum(album: AlbumItem) {
-    if (!contains(album)) add(album)
+    if (none { it.id == album.id }) {
+        add(album)
+    }
 }
 
 /** Unselect a single album if present. */
 fun SnapshotStateList<AlbumItem>.unselectAlbum(album: AlbumItem) {
-    remove(album)
+    val existingIndex = indexOfFirst { it.id == album.id }
+    if (existingIndex >= 0) {
+        removeAt(existingIndex)
+    }
 }
 
 /**
  * Select all albums from the given list that are not already selected.
  */
 fun SnapshotStateList<AlbumItem>.selectAllAlbums(albums: List<AlbumItem>) {
-    val toAdd = albums.filter { !contains(it) }
+    if (albums.isEmpty()) return
+    val selectedIds = asSequence().map { it.id }.toHashSet()
+    val toAdd = albums.filter { it.id !in selectedIds }
     addAll(toAdd)
 }
 
@@ -95,5 +115,7 @@ fun SnapshotStateList<AlbumItem>.selectAllAlbums(albums: List<AlbumItem>) {
  * Returns true if every album in [albums] is currently selected.
  */
 fun SnapshotStateList<AlbumItem>.allAlbumsSelected(albums: List<AlbumItem>): Boolean {
-    return albums.isNotEmpty() && albums.all { contains(it) }
+    if (albums.isEmpty()) return false
+    val selectedIds = asSequence().map { it.id }.toHashSet()
+    return albums.all { it.id in selectedIds }
 }

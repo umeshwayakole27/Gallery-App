@@ -2,8 +2,6 @@ package com.uw.simplegallery.usecase
 
 import com.uw.simplegallery.data.model.MediaItem
 import com.uw.simplegallery.data.repository.MediaRepository
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 
 /**
@@ -13,10 +11,8 @@ import javax.inject.Inject
 class GetMediaDetailUseCase @Inject constructor(
     private val mediaRepository: MediaRepository
 ) {
-    operator fun invoke(mediaId: Long): Flow<MediaItem?> {
-        return mediaRepository.getAllMediaItems()
-            .map { mediaItems ->
-                mediaItems.find { it.id == mediaId }
-            }
+    suspend operator fun invoke(mediaId: Long, forceRefresh: Boolean = false): MediaItem? {
+        return mediaRepository.getAllMediaItems(forceRefresh)
+            .find { it.id == mediaId }
     }
 }

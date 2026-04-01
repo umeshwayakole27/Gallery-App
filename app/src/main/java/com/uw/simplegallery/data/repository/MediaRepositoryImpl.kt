@@ -2,40 +2,32 @@ package com.uw.simplegallery.data.repository
 
 import com.uw.simplegallery.data.model.AlbumItem
 import com.uw.simplegallery.data.model.MediaItem
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
 import javax.inject.Inject
 
 /**
  * Implementation of [MediaRepository] that delegates to [MediaManager]
  * for all MediaStore operations.
- *
- * Each Flow-returning method triggers a fresh [MediaManager.loadAllMedia] call
- * to ensure up-to-date data from the OS, then emits the result.
  */
 class MediaRepositoryImpl @Inject constructor(
     private val mediaManager: MediaManager
 ) : MediaRepository {
 
-    override fun getAllMediaItems(): Flow<List<MediaItem>> = flow {
-        mediaManager.loadAllMedia()
-        emit(mediaManager.allMediaItems.value)
+    override suspend fun getAllMediaItems(forceRefresh: Boolean): List<MediaItem> {
+        return if (forceRefresh || !mediaManager.hasLoadedMedia()) {
+            mediaManager.loadAllMedia()
+        } else {
+            mediaManager.allMediaItems.value
+        }
     }
 
-    override fun getAlbums(): Flow<List<AlbumItem>> = flow {
-        // Ensure media is loaded before grouping into albums
-        if (mediaManager.allMediaItems.value.isEmpty()) {
-            mediaManager.loadAllMedia()
-        }
-        emit(mediaManager.getAlbums())
+    override suspend fun getAlbums(forceRefreshMedia: Boolean): List<AlbumItem> {
+        getAllMediaItems(forceRefresh = forceRefreshMedia)
+        return mediaManager.getAlbums()
     }
 
-    override fun searchMedia(query: String): Flow<List<MediaItem>> = flow {
-        // Ensure media is loaded before searching
-        if (mediaManager.allMediaItems.value.isEmpty()) {
-            mediaManager.loadAllMedia()
-        }
-        emit(mediaManager.searchMedia(query))
+    override suspend fun searchMedia(query: String): List<MediaItem> {
+        getAllMediaItems(forceRefresh = !mediaManager.hasLoadedMedia())
+        return mediaManager.searchMedia(query)
     }
 
     override suspend fun deleteMediaItems(ids: List<Long>): MediaManager.DeleteResult {

@@ -12,6 +12,12 @@ data class AlbumItem(
     val name: String,              // Folder display name
     val mediaItems: List<MediaItem> // List of media items inside the album
 ) {
+    companion object {
+        const val ALL_PHOTOS_ID = "ALL_PHOTOS"
+        const val ALL_PHOTOS_NAME = "All Photos"
+        const val UNKNOWN_ALBUM_NAME = "Unknown"
+    }
+
     val mediaCount: Int
         get() = mediaItems.size
 

@@ -2,7 +2,6 @@ package com.uw.simplegallery.usecase
 
 import com.uw.simplegallery.data.model.AlbumItem
 import com.uw.simplegallery.data.repository.MediaRepository
-import kotlinx.coroutines.flow.Flow
 import javax.inject.Inject
 
 /**
@@ -13,7 +12,7 @@ import javax.inject.Inject
 class GetAlbumsUseCase @Inject constructor(
     private val mediaRepository: MediaRepository
 ) {
-    operator fun invoke(): Flow<List<AlbumItem>> {
-        return mediaRepository.getAlbums()
+    suspend operator fun invoke(forceRefreshMedia: Boolean = false): List<AlbumItem> {
+        return mediaRepository.getAlbums(forceRefreshMedia)
     }
 }

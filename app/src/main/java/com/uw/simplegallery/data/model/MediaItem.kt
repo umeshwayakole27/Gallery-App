@@ -23,7 +23,6 @@ data class MediaItem(
     val dateTaken: Long?,
     val mediaType: MediaType,
     val folderName: String?,
-    val path: String?,
     val size: Long?,
     val duration: Long? = null
 )

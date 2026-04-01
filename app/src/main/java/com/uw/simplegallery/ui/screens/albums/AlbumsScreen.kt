@@ -101,6 +101,9 @@ fun AlbumsScreen(
 
     val gridState = rememberLazyGridState()
     val isSelecting by remember { derivedStateOf { selectedAlbumsList.isNotEmpty() } }
+    val selectedAlbumIds by remember {
+        derivedStateOf { selectedAlbumsList.asSequence().map { it.id }.toHashSet() }
+    }
 
     // Report scroll state to parent for FAB expand/collapse
     val isScrolledDown by remember {
@@ -174,14 +177,11 @@ fun AlbumsScreen(
                         items = albums,
                         key = { it.id }
                     ) { album ->
-                        val isItemSelected by remember(selectedAlbumsList.size) {
-                            derivedStateOf { selectedAlbumsList.contains(album) }
-                        }
+                        val isItemSelected = album.id in selectedAlbumIds
 
                         SelectableAlbumGridItem(
                             album = album,
                             isSelected = isItemSelected,
-                            isSelectionMode = isSelecting,
                             onTap = {
                                 if (isSelecting) {
                                     selectedAlbumsList.toggleAlbum(album)
@@ -234,7 +234,6 @@ fun AlbumsScreen(
  *
  * @param album The [AlbumItem] to display
  * @param isSelected Whether this album is currently selected
- * @param isSelectionMode Whether we're in multi-select mode
  * @param onTap Callback for single tap
  * @param onLongPress Callback for long press
  */
@@ -243,7 +242,6 @@ fun AlbumsScreen(
 private fun SelectableAlbumGridItem(
     album: AlbumItem,
     isSelected: Boolean,
-    isSelectionMode: Boolean,
     onTap: () -> Unit,
     onLongPress: () -> Unit
 ) {

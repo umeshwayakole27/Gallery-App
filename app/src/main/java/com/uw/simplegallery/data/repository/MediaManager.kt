@@ -2,7 +2,6 @@ package com.uw.simplegallery.data.repository
 
 import android.app.PendingIntent
 import android.app.RecoverableSecurityException
-import android.content.ContentResolver
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
@@ -39,8 +38,13 @@ private const val TAG = "MediaManager"
 class MediaManager @Inject constructor(
     @param:ApplicationContext private val context: Context
 ) {
+    @Volatile
+    private var hasLoadedMediaOnce = false
+
     private val _allMediaItems = MutableStateFlow<List<MediaItem>>(emptyList())
     val allMediaItems = _allMediaItems.asStateFlow()
+
+    fun hasLoadedMedia(): Boolean = hasLoadedMediaOnce
 
     /**
      * Loads all media (images and videos) from device storage via MediaStore.
@@ -51,11 +55,11 @@ class MediaManager @Inject constructor(
     suspend fun loadAllMedia(): List<MediaItem> = withContext(Dispatchers.IO) {
 
         val mediaItems = mutableListOf<MediaItem>()
+        val resolver = context.contentResolver
 
         val projection = arrayOf(
             MediaStore.Files.FileColumns._ID,
             MediaStore.Files.FileColumns.DISPLAY_NAME,
-            MediaStore.Files.FileColumns.DATA,
             MediaStore.Files.FileColumns.MIME_TYPE,
             MediaStore.Files.FileColumns.DATE_TAKEN,
             MediaStore.Files.FileColumns.DATE_ADDED,
@@ -78,7 +82,7 @@ class MediaManager @Inject constructor(
 
         val queryUri = MediaStore.Files.getContentUri("external")
 
-        context.contentResolver.query(
+        resolver.query(
             queryUri,
             projection,
             selection,
@@ -88,8 +92,6 @@ class MediaManager @Inject constructor(
             val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID)
             val nameColumn =
                 cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DISPLAY_NAME)
-            val pathColumn =
-                cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATA)
             val mimeTypeColumn =
                 cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MIME_TYPE)
             val dateTakenColumn =
@@ -109,14 +111,13 @@ class MediaManager @Inject constructor(
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idColumn)
                 val name = cursor.getString(nameColumn)
-                val path = cursor.getString(pathColumn)
                 val mimeType = cursor.getString(mimeTypeColumn)
-                
+
                 // Try DATE_TAKEN (millis), fallback to DATE_MODIFIED (secs), then DATE_ADDED (secs)
                 val dateTaken = cursor.getLongOrNull(dateTakenColumn)
                     ?: cursor.getLongOrNull(dateModifiedColumn)?.let { it * 1000 }
                     ?: cursor.getLongOrNull(dateAddedColumn)?.let { it * 1000 }
-                
+
                 val size = cursor.getLongOrNull(sizeColumn)
                 val mediaTypeValue = cursor.getInt(mediaTypeColumn)
                 val relativePath = cursor.getString(relativePathColumn)
@@ -144,7 +145,6 @@ class MediaManager @Inject constructor(
                         dateTaken = dateTaken,
                         mediaType = mediaType,
                         folderName = relativePath,
-                        path = path,
                         size = size,
                         duration = if (mediaType == MediaType.Video) duration else null
                     )
@@ -153,6 +153,7 @@ class MediaManager @Inject constructor(
         }
 
         _allMediaItems.value = mediaItems
+        hasLoadedMediaOnce = true
         mediaItems
     }
 
@@ -183,14 +184,14 @@ class MediaManager @Inject constructor(
         if (allMedia.isEmpty()) return emptyList()
 
         val groupedAlbums = allMedia
-            .groupBy { it.folderName ?: "Unknown" }
+            .groupBy { it.folderName ?: AlbumItem.UNKNOWN_ALBUM_NAME }
             .map { (folderName, items) ->
                 val cleanFolderName = folderName.trimEnd('/')
-                val albumName = cleanFolderName.substringAfterLast("/").ifBlank { "Unknown" }
+                val albumName = cleanFolderName.substringAfterLast("/").ifBlank { AlbumItem.UNKNOWN_ALBUM_NAME }
                 AlbumItem(
                     id = folderName,
                     name = albumName,
-                    mediaItems = items.sortedByDescending { it.dateTaken }
+                    mediaItems = items
                 )
             }
             .sortedByDescending { album ->
@@ -198,9 +199,9 @@ class MediaManager @Inject constructor(
             }
 
         val allPhotosAlbum = AlbumItem(
-            id = "ALL_PHOTOS",
-            name = "All Photos",
-            mediaItems = allMedia.sortedByDescending { it.dateTaken }
+            id = AlbumItem.ALL_PHOTOS_ID,
+            name = AlbumItem.ALL_PHOTOS_NAME,
+            mediaItems = allMedia
         )
 
         return listOf(allPhotosAlbum) + groupedAlbums
@@ -506,6 +507,7 @@ class MediaManager @Inject constructor(
      * Force reload all media from the OS (clears and re-queries).
      */
     suspend fun forceReload(): List<MediaItem> = withContext(Dispatchers.IO) {
+        hasLoadedMediaOnce = false
         _allMediaItems.value = emptyList()
         loadAllMedia()
     }

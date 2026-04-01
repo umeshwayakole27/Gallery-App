@@ -174,6 +174,9 @@ fun GalleryGridScreen(
 
     val snackbarHostState = remember { SnackbarHostState() }
     val isSelecting by remember { derivedStateOf { selectedItemsList.isNotEmpty() } }
+    val selectedItemIds by remember {
+        derivedStateOf { selectedItemsList.asSequence().map { it.id }.toHashSet() }
+    }
 
     // Grid state for drag-to-select
     val gridState = rememberLazyGridState()
@@ -392,14 +395,11 @@ fun GalleryGridScreen(
 
                                 is TimelineItem.Photo -> {
                                     val image = item.mediaItem
-                                    val isItemSelected by remember(selectedItemsList.size) {
-                                        derivedStateOf { selectedItemsList.contains(image) }
-                                    }
+                                    val isItemSelected = image.id in selectedItemIds
 
                                     SelectableImageGridItem(
                                         image = image,
                                         isSelected = isItemSelected,
-                                        isSelectionMode = isSelecting,
                                         onTap = {
                                             if (isSelecting) {
                                                 selectedItemsList.toggleItem(image)
@@ -505,14 +505,12 @@ private fun CurrentTimelineSectionChip(
  *
  * @param image The [MediaItem] to display
  * @param isSelected Whether this item is currently selected
- * @param isSelectionMode Whether we're in multi-select mode
  * @param onTap Callback for single tap
  */
 @Composable
 private fun SelectableImageGridItem(
     image: MediaItem,
     isSelected: Boolean,
-    isSelectionMode: Boolean,
     onTap: () -> Unit
 ) {
     // Animated scale: 0.85 when selected, 1.0 when not (adapted from Tulsi's 0.8)
@@ -768,7 +766,7 @@ private fun Modifier.dragSelectionHandler(
                 initialIndex = idx
                 currentIndex = idx
                 // Determine mode: if tapped item is already selected, drag deselects
-                isSelectingMode = !selectedItemsList.contains(item)
+                isSelectingMode = selectedItemsList.none { it.id == item.id }
                 if (isSelectingMode) {
                     selectedItemsList.selectItem(item)
                 } else {
