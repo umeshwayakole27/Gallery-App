@@ -24,7 +24,8 @@ data class MediaItem(
     val mediaType: MediaType,
     val folderName: String?,
     val size: Long?,
-    val duration: Long? = null
+    val duration: Long? = null,
+    val tags: List<String> = emptyList()
 )
 
 @Serializable

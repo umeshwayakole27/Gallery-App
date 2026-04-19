@@ -19,6 +19,8 @@ import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -49,10 +51,12 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -76,6 +80,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -130,6 +135,7 @@ fun ImageDetailScreen(
     // Determine which image list to use: album media if available, otherwise all media
     val albumMedia by viewModel.currentAlbumMedia.collectAsState()
     val allMedia by viewModel.media.collectAsState()
+    val allTags by viewModel.allTags.collectAsState()
     val imageList = if (albumMedia.isNotEmpty()) albumMedia else allMedia
 
     // Find the initial page index for the tapped image
@@ -168,8 +174,10 @@ fun ImageDetailScreen(
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showInfoSheet by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
+    var showTagsSheet by remember { mutableStateOf(false) }
     var showOverflowMenu by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
+    var newTagInput by remember { mutableStateOf("") }
     val sheetState = rememberModalBottomSheetState()
 
     Box(
@@ -301,21 +309,23 @@ fun ImageDetailScreen(
                                 modifier = Modifier.size(24.dp)
                             )
                         }
+                    }
 
-                        Box {
-                            IconButton(onClick = { showOverflowMenu = true }) {
+                    Box {
+                        IconButton(onClick = { showOverflowMenu = true }) {
                                 Icon(
                                     imageVector = Icons.Default.MoreVert,
-                                    contentDescription = "More actions",
+                                    contentDescription = null,
                                     tint = Color.White
                                 )
                             }
-                            DropdownMenu(
-                                expanded = showOverflowMenu,
-                                onDismissRequest = { showOverflowMenu = false }
-                            ) {
+                        DropdownMenu(
+                            expanded = showOverflowMenu,
+                            onDismissRequest = { showOverflowMenu = false }
+                        ) {
+                            if (currentMedia?.mediaType is MediaType.Image) {
                                 DropdownMenuItem(
-                                    text = { Text("Use as") },
+                                    text = { Text(stringResource(id = R.string.action_use_as)) },
                                     onClick = {
                                         showOverflowMenu = false
                                         currentMedia?.let { mediaItem ->
@@ -324,6 +334,14 @@ fun ImageDetailScreen(
                                     }
                                 )
                             }
+                            DropdownMenuItem(
+                                text = { Text(stringResource(id = R.string.action_manage_tags)) },
+                                onClick = {
+                                    showOverflowMenu = false
+                                    newTagInput = ""
+                                    showTagsSheet = true
+                                }
+                            )
                         }
                     }
                 }
@@ -510,6 +528,33 @@ fun ImageDetailScreen(
             )
         }
     }
+
+                if (showTagsSheet && currentMedia != null) {
+        ModalBottomSheet(
+            onDismissRequest = { showTagsSheet = false },
+            sheetState = sheetState
+        ) {
+            MediaTagsSheetContent(
+                mediaItem = currentMedia,
+                allTags = allTags,
+                newTagInput = newTagInput,
+                onTagInputChange = { newTagInput = it },
+                onAddTag = {
+                    viewModel.addTagToMedia(currentMedia.id, it)
+                    newTagInput = ""
+                },
+                onRemoveTag = {
+                    viewModel.removeTagFromMedia(currentMedia.id, it)
+                },
+                onDismiss = {
+                    scope.launch {
+                        sheetState.hide()
+                        showTagsSheet = false
+                    }
+                }
+            )
+        }
+    }
 }
 
 private fun launchUseAsChooser(context: Context, mediaItem: MediaItem) {
@@ -526,7 +571,12 @@ private fun launchUseAsChooser(context: Context, mediaItem: MediaItem) {
     }
 
     try {
-        context.startActivity(Intent.createChooser(useAsIntent, "Use as"))
+        context.startActivity(
+            Intent.createChooser(
+                useAsIntent,
+                context.getString(R.string.action_use_as)
+            )
+        )
     } catch (_: ActivityNotFoundException) {
         val setWallpaperIntent = Intent(Intent.ACTION_SET_WALLPAPER).apply {
             setDataAndType(mediaUri, mimeType)
@@ -536,9 +586,18 @@ private fun launchUseAsChooser(context: Context, mediaItem: MediaItem) {
         }
 
         try {
-            context.startActivity(Intent.createChooser(setWallpaperIntent, "Set wallpaper"))
+            context.startActivity(
+                Intent.createChooser(
+                    setWallpaperIntent,
+                    context.getString(R.string.action_set_wallpaper)
+                )
+            )
         } catch (_: ActivityNotFoundException) {
-            Toast.makeText(context, "No app found for Use as", Toast.LENGTH_SHORT).show()
+            Toast.makeText(
+                context,
+                context.getString(R.string.msg_no_app_use_as),
+                Toast.LENGTH_SHORT
+            ).show()
         }
     }
 }
@@ -735,6 +794,116 @@ private fun ImageInfoContent(
             modifier = Modifier.align(Alignment.End)
         ) {
             Text("Close")
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun MediaTagsSheetContent(
+    mediaItem: MediaItem,
+    allTags: List<String>,
+    newTagInput: String,
+    onTagInputChange: (String) -> Unit,
+    onAddTag: (String) -> Unit,
+    onRemoveTag: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val normalizedInput = remember(newTagInput) {
+        newTagInput.trim().lowercase().replace("\\s+".toRegex(), " ")
+    }
+    val canAddTag = normalizedInput.isNotBlank() && normalizedInput !in mediaItem.tags
+    val suggestedTags = remember(allTags, mediaItem.tags) {
+        allTags.filterNot { it in mediaItem.tags }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(24.dp)
+    ) {
+        Text(
+            text = stringResource(id = R.string.action_manage_tags),
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold
+        )
+        Text(
+            text = stringResource(id = R.string.msg_manage_tags_subtitle),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp)
+        )
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        OutlinedTextField(
+            value = newTagInput,
+            onValueChange = onTagInputChange,
+            label = { Text(stringResource(id = R.string.hint_new_tag)) },
+            placeholder = { Text(stringResource(id = R.string.hint_new_tag_example)) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End
+        ) {
+            TextButton(
+                enabled = canAddTag,
+                onClick = { onAddTag(normalizedInput) }
+            ) {
+                Text(stringResource(id = R.string.action_add_tag))
+            }
+        }
+
+        if (mediaItem.tags.isNotEmpty()) {
+            Text(
+                text = stringResource(id = R.string.label_current_tags),
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(top = 6.dp)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                mediaItem.tags.forEach { tag ->
+                    FilterChip(
+                        selected = true,
+                        onClick = { onRemoveTag(tag) },
+                        label = { Text(stringResource(id = R.string.label_hash_tag, tag)) }
+                    )
+                }
+            }
+        }
+
+        if (suggestedTags.isNotEmpty()) {
+            Text(
+                text = stringResource(id = R.string.label_suggested_tags),
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(top = 14.dp)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                suggestedTags.forEach { tag ->
+                    FilterChip(
+                        selected = false,
+                        onClick = { onAddTag(tag) },
+                        label = { Text(stringResource(id = R.string.label_hash_tag, tag)) }
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+        TextButton(
+            onClick = onDismiss,
+            modifier = Modifier.align(Alignment.End)
+        ) {
+            Text(stringResource(id = R.string.action_done))
         }
     }
 }

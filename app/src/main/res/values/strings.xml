@@ -1,3 +1,76 @@
 <resources>
     <string name="app_name">Simple Gallery</string>
+
+    <string name="nav_gallery">Gallery</string>
+    <string name="nav_albums">Albums</string>
+    <string name="nav_search_tags">Search/Tags</string>
+
+    <string name="screen_search_tags_title">Search/Tags</string>
+    <string name="screen_tag_manager_title">Tag Manager</string>
+    <string name="screen_gallery_title">Gallery</string>
+    <string name="screen_album_fallback_title">Album</string>
+    <string name="screen_albums_title">Albums</string>
+
+    <string name="label_tags">Tags</string>
+    <string name="label_current_tags">Current tags</string>
+    <string name="label_suggested_tags">Suggested tags</string>
+    <string name="label_media_count">Media (%1$d)</string>
+    <string name="label_albums_count">Albums (%1$d)</string>
+    <string name="label_media_type_image">Image</string>
+    <string name="label_media_type_video">Video</string>
+    <string name="label_unknown">Unknown</string>
+    <string name="label_unknown_date">Unknown date</string>
+    <string name="label_hash_tag">#%1$s</string>
+
+    <string name="hint_search_media">Search media</string>
+    <string name="hint_search_in_album">Search in album</string>
+    <string name="hint_search_albums">Search albums</string>
+    <string name="hint_search_media_and_albums">Search media and albums</string>
+    <string name="hint_search_metadata">Name, tag, date, type, album</string>
+    <string name="hint_new_tag">New tag</string>
+    <string name="hint_new_tag_example">e.g. vacation, family</string>
+    <string name="hint_rename_tag">New tag name</string>
+    <string name="hint_merge_target_tag">Target tag</string>
+
+    <string name="action_search_images">Search images</string>
+    <string name="action_search_albums">Search albums</string>
+    <string name="action_close_search">Close search</string>
+    <string name="action_clear_filters">Clear filters</string>
+    <string name="action_use_as">Use as</string>
+    <string name="action_set_wallpaper">Set wallpaper</string>
+    <string name="action_manage_tags">Manage tags</string>
+    <string name="action_open_tag_manager">Open tag manager</string>
+    <string name="action_add_tag">Add tag</string>
+    <string name="action_done">Done</string>
+    <string name="action_rename">Rename</string>
+    <string name="action_merge">Merge</string>
+    <string name="action_delete">Delete</string>
+
+    <string name="msg_no_app_use_as">No app found for Use as</string>
+    <string name="msg_manage_tags_subtitle">Use tags to quickly find this media later</string>
+    <string name="msg_no_matching_albums">No matching albums</string>
+    <string name="msg_no_matching_media">No matching media</string>
+    <string name="msg_no_images_found">No images found</string>
+    <string name="msg_no_images_in_album">No images in this album</string>
+    <string name="msg_photos_in_album_will_appear">Photos added to this album will appear here</string>
+    <string name="msg_photos_videos_will_appear">Your photos and videos will appear here</string>
+    <string name="msg_no_albums_found">No albums found</string>
+    <string name="msg_no_matches_in_album">No matches in this album</string>
+    <string name="msg_try_search_metadata">Try searching by name, date, tag, or metadata</string>
+    <string name="msg_no_media_matches_filters">No media matches the current filters</string>
+    <string name="msg_no_albums_match_filters">No albums match the current filters</string>
+    <string name="msg_tag_manager_subtitle">Rename, merge, or delete tags globally</string>
+    <string name="msg_tag_manager_empty">No tags available yet</string>
+    <string name="msg_tag_manager_invalid_rename">Unable to rename tag</string>
+    <string name="msg_tag_manager_invalid_merge">Unable to merge tags</string>
+
+    <string name="dialog_rename_tag_title">Rename tag</string>
+    <string name="dialog_rename_tag_message">Rename #%1$s to:</string>
+    <string name="dialog_merge_tag_title">Merge tag</string>
+    <string name="dialog_merge_tag_message">Merge #%1$s into:</string>
+    <string name="dialog_delete_tag_title">Delete tag</string>
+    <string name="dialog_delete_tag_message">Remove #%1$s from all media?</string>
+
+    <string name="format_media_subtitle">%1$s - %2$s - %3$s</string>
+    <string name="format_items_count">%1$d items</string>
 </resources>

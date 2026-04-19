@@ -222,7 +222,7 @@ private fun FloatingNavBarItem(
 
     Column(
         modifier = Modifier
-            .width(70.dp)
+            .width(80.dp)
             .padding(vertical = 4.dp)
             .clickable(
                 indication = null,

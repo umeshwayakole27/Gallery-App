@@ -45,4 +45,34 @@ class MediaRepositoryImpl @Inject constructor(
     override suspend fun renameMediaItem(id: Long, newName: String): Boolean {
         return mediaManager.renameMediaItem(id, newName)
     }
+
+    override suspend fun getAllTags(): List<String> {
+        getAllMediaItems(forceRefresh = !mediaManager.hasLoadedMedia())
+        return mediaManager.getAllTags()
+    }
+
+    override suspend fun addTagToMedia(id: Long, tag: String): List<String> {
+        getAllMediaItems(forceRefresh = !mediaManager.hasLoadedMedia())
+        return mediaManager.addTagToMedia(id, tag)
+    }
+
+    override suspend fun removeTagFromMedia(id: Long, tag: String): List<String> {
+        getAllMediaItems(forceRefresh = !mediaManager.hasLoadedMedia())
+        return mediaManager.removeTagFromMedia(id, tag)
+    }
+
+    override suspend fun renameTagGlobally(oldTag: String, newTag: String): Boolean {
+        getAllMediaItems(forceRefresh = !mediaManager.hasLoadedMedia())
+        return mediaManager.renameTagGlobally(oldTag, newTag)
+    }
+
+    override suspend fun mergeTagsGlobally(sourceTag: String, targetTag: String): Boolean {
+        getAllMediaItems(forceRefresh = !mediaManager.hasLoadedMedia())
+        return mediaManager.mergeTagsGlobally(sourceTag, targetTag)
+    }
+
+    override suspend fun deleteTagGlobally(tag: String): Boolean {
+        getAllMediaItems(forceRefresh = !mediaManager.hasLoadedMedia())
+        return mediaManager.deleteTagGlobally(tag)
+    }
 }

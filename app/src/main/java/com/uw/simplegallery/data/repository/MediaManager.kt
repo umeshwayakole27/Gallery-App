@@ -23,6 +23,8 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 private const val TAG = "MediaManager"
+private const val TAG_PREFS_NAME = "media_tags_store"
+private const val TAG_KEY_PREFIX = "media_tags_"
 
 /**
  * Data source responsible for loading media items and albums from device storage
@@ -43,6 +45,10 @@ class MediaManager @Inject constructor(
 
     private val _allMediaItems = MutableStateFlow<List<MediaItem>>(emptyList())
     val allMediaItems = _allMediaItems.asStateFlow()
+
+    private val tagsPrefs by lazy {
+        context.getSharedPreferences(TAG_PREFS_NAME, Context.MODE_PRIVATE)
+    }
 
     fun hasLoadedMedia(): Boolean = hasLoadedMediaOnce
 
@@ -122,6 +128,7 @@ class MediaManager @Inject constructor(
                 val mediaTypeValue = cursor.getInt(mediaTypeColumn)
                 val relativePath = cursor.getString(relativePathColumn)
                 val duration = cursor.getLongOrNull(durationColumn)
+                val tags = getTagsForMediaId(id)
 
                 val mediaType = when (mediaTypeValue) {
                     MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE -> MediaType.Image
@@ -146,7 +153,8 @@ class MediaManager @Inject constructor(
                         mediaType = mediaType,
                         folderName = relativePath,
                         size = size,
-                        duration = if (mediaType == MediaType.Video) duration else null
+                        duration = if (mediaType == MediaType.Video) duration else null,
+                        tags = tags
                     )
                 )
             }
@@ -218,6 +226,113 @@ class MediaManager @Inject constructor(
         return allMediaItems.value.filter {
             it.name.contains(query, ignoreCase = true)
         }
+    }
+
+    fun getAllTags(): List<String> {
+        val allTags = allMediaItems.value
+            .asSequence()
+            .flatMap { it.tags.asSequence() }
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .map { it.lowercase() }
+            .toSet()
+        return allTags.sorted()
+    }
+
+    fun addTagToMedia(id: Long, rawTag: String): List<String> {
+        val normalized = normalizeTag(rawTag) ?: return getTagsForMediaId(id)
+        val currentTags = getTagsForMediaId(id)
+        if (normalized in currentTags) {
+            return currentTags
+        }
+        val updated = (currentTags + normalized).distinct().sorted()
+        persistTagsForMediaId(id, updated)
+        updateMediaTagsInCache(id, updated)
+        return updated
+    }
+
+    fun removeTagFromMedia(id: Long, rawTag: String): List<String> {
+        val normalized = normalizeTag(rawTag) ?: return getTagsForMediaId(id)
+        val updated = getTagsForMediaId(id)
+            .filterNot { it == normalized }
+            .sorted()
+        persistTagsForMediaId(id, updated)
+        updateMediaTagsInCache(id, updated)
+        return updated
+    }
+
+    fun renameTagGlobally(oldTagRaw: String, newTagRaw: String): Boolean {
+        val oldTag = normalizeTag(oldTagRaw) ?: return false
+        val newTag = normalizeTag(newTagRaw) ?: return false
+        if (oldTag == newTag) return false
+
+        var hasChanged = false
+        val updatedMedia = _allMediaItems.value.map { item ->
+            if (oldTag !in item.tags) {
+                item
+            } else {
+                hasChanged = true
+                val nextTags = item.tags
+                    .map { if (it == oldTag) newTag else it }
+                    .distinct()
+                    .sorted()
+                persistTagsForMediaId(item.id, nextTags)
+                item.copy(tags = nextTags)
+            }
+        }
+
+        if (hasChanged) {
+            _allMediaItems.value = updatedMedia
+        }
+        return hasChanged
+    }
+
+    fun mergeTagsGlobally(sourceTagRaw: String, targetTagRaw: String): Boolean {
+        val sourceTag = normalizeTag(sourceTagRaw) ?: return false
+        val targetTag = normalizeTag(targetTagRaw) ?: return false
+        if (sourceTag == targetTag) return false
+
+        var hasChanged = false
+        val updatedMedia = _allMediaItems.value.map { item ->
+            if (sourceTag !in item.tags) {
+                item
+            } else {
+                hasChanged = true
+                val nextTags = item.tags
+                    .filterNot { it == sourceTag }
+                    .plus(targetTag)
+                    .distinct()
+                    .sorted()
+                persistTagsForMediaId(item.id, nextTags)
+                item.copy(tags = nextTags)
+            }
+        }
+
+        if (hasChanged) {
+            _allMediaItems.value = updatedMedia
+        }
+        return hasChanged
+    }
+
+    fun deleteTagGlobally(tagRaw: String): Boolean {
+        val tag = normalizeTag(tagRaw) ?: return false
+
+        var hasChanged = false
+        val updatedMedia = _allMediaItems.value.map { item ->
+            if (tag !in item.tags) {
+                item
+            } else {
+                hasChanged = true
+                val nextTags = item.tags.filterNot { it == tag }.sorted()
+                persistTagsForMediaId(item.id, nextTags)
+                item.copy(tags = nextTags)
+            }
+        }
+
+        if (hasChanged) {
+            _allMediaItems.value = updatedMedia
+        }
+        return hasChanged
     }
 
     /**
@@ -363,6 +478,7 @@ class MediaManager @Inject constructor(
         if (validIds.isEmpty()) {
             // All items were already deleted from MediaStore — clean up cache
             _allMediaItems.value = _allMediaItems.value.filter { it.id !in ids }
+            ids.forEach(::clearTagsForMediaId)
             return@withContext DeleteResult.Success
         }
 
@@ -434,6 +550,7 @@ class MediaManager @Inject constructor(
                 if (deletedCount > 0) {
                     val successIds = validIds.filterNot { it in failedIds }
                     _allMediaItems.value = _allMediaItems.value.filter { it.id !in successIds }
+                    successIds.forEach(::clearTagsForMediaId)
                 }
 
                 when {
@@ -473,6 +590,7 @@ class MediaManager @Inject constructor(
             }
             if (deletedCount > 0) {
                 _allMediaItems.value = _allMediaItems.value.filter { it.id !in validIds }
+                validIds.forEach(::clearTagsForMediaId)
                 DeleteResult.Success
             } else {
                 Log.w(TAG, "Failed to delete any items on API ${Build.VERSION.SDK_INT}")
@@ -500,6 +618,7 @@ class MediaManager @Inject constructor(
 
         if (actuallyDeletedIds.isNotEmpty()) {
             _allMediaItems.value = _allMediaItems.value.filter { it.id !in actuallyDeletedIds }
+            actuallyDeletedIds.forEach(::clearTagsForMediaId)
         }
     }
 
@@ -609,5 +728,39 @@ class MediaManager @Inject constructor(
 
     private fun Cursor.getLongOrNull(columnIndex: Int): Long? {
         return if (isNull(columnIndex)) null else getLong(columnIndex)
+    }
+
+    private fun getTagsForMediaId(id: Long): List<String> {
+        return tagsPrefs
+            .getStringSet("$TAG_KEY_PREFIX$id", emptySet())
+            .orEmpty()
+            .asSequence()
+            .mapNotNull(::normalizeTag)
+            .distinct()
+            .sorted()
+            .toList()
+    }
+
+    private fun persistTagsForMediaId(id: Long, tags: List<String>) {
+        if (tags.isEmpty()) {
+            clearTagsForMediaId(id)
+            return
+        }
+        tagsPrefs.edit().putStringSet("$TAG_KEY_PREFIX$id", tags.toSet()).apply()
+    }
+
+    private fun clearTagsForMediaId(id: Long) {
+        tagsPrefs.edit().remove("$TAG_KEY_PREFIX$id").apply()
+    }
+
+    private fun updateMediaTagsInCache(id: Long, tags: List<String>) {
+        _allMediaItems.value = _allMediaItems.value.map { item ->
+            if (item.id == id) item.copy(tags = tags) else item
+        }
+    }
+
+    private fun normalizeTag(tag: String): String? {
+        val normalized = tag.trim().lowercase().replace("\\s+".toRegex(), " ")
+        return normalized.takeIf { it.isNotBlank() }
     }
 }

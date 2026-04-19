@@ -28,6 +28,9 @@ internal class GalleryStateCoordinator {
     private val _currentAlbumName = MutableStateFlow<String?>(null)
     val currentAlbumName: StateFlow<String?> = _currentAlbumName.asStateFlow()
 
+    private val _allTags = MutableStateFlow<List<String>>(emptyList())
+    val allTags: StateFlow<List<String>> = _allTags.asStateFlow()
+
     private var currentAlbumId: String? = null
 
     fun setLoading(isLoading: Boolean) {
@@ -44,10 +47,39 @@ internal class GalleryStateCoordinator {
 
     fun updateMedia(mediaItems: List<MediaItem>) {
         _media.value = mediaItems
+        syncAllTagsFromMedia()
     }
 
     fun updateAlbums(albumItems: List<AlbumItem>) {
         _albums.value = albumItems
+    }
+
+    fun updateAllTags(tags: List<String>) {
+        _allTags.value = tags
+    }
+
+    fun refreshTagsFromCurrentMedia() {
+        syncAllTagsFromMedia()
+    }
+
+    fun updateMediaTags(mediaId: Long, tags: List<String>) {
+        _media.value = _media.value.map { item ->
+            if (item.id == mediaId) item.copy(tags = tags) else item
+        }
+        _albums.value = _albums.value.map { album ->
+            album.copy(
+                mediaItems = album.mediaItems.map { item ->
+                    if (item.id == mediaId) item.copy(tags = tags) else item
+                }
+            )
+        }
+        _currentAlbumMedia.value = _currentAlbumMedia.value.map { item ->
+            if (item.id == mediaId) item.copy(tags = tags) else item
+        }
+        _selectedMedia.value = _selectedMedia.value?.let { selected ->
+            if (selected.id == mediaId) selected.copy(tags = tags) else selected
+        }
+        syncAllTagsFromMedia()
     }
 
     fun setAlbumFilter(albumId: String) {
@@ -97,5 +129,16 @@ internal class GalleryStateCoordinator {
             ?: albumId.trimEnd('/').substringAfterLast('/').ifBlank { "Album" }
         val filteredMedia = _media.value.filter { it.folderName == albumId }
         return filteredMedia to fallbackName
+    }
+
+    private fun syncAllTagsFromMedia() {
+        _allTags.value = _media.value
+            .asSequence()
+            .flatMap { it.tags.asSequence() }
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+            .sorted()
+            .toList()
     }
 }

@@ -29,6 +29,30 @@ internal class GalleryMediaCoordinator(
         }
     }
 
+    suspend fun getAllTags(): List<String> {
+        return mediaRepository.getAllTags()
+    }
+
+    suspend fun addTagToMedia(id: Long, tag: String): List<String> {
+        return mediaRepository.addTagToMedia(id, tag)
+    }
+
+    suspend fun removeTagFromMedia(id: Long, tag: String): List<String> {
+        return mediaRepository.removeTagFromMedia(id, tag)
+    }
+
+    suspend fun renameTagGlobally(oldTag: String, newTag: String): Boolean {
+        return mediaRepository.renameTagGlobally(oldTag, newTag)
+    }
+
+    suspend fun mergeTagsGlobally(sourceTag: String, targetTag: String): Boolean {
+        return mediaRepository.mergeTagsGlobally(sourceTag, targetTag)
+    }
+
+    suspend fun deleteTagGlobally(tag: String): Boolean {
+        return mediaRepository.deleteTagGlobally(tag)
+    }
+
     suspend fun createAlbum(folderName: String): Boolean {
         return mediaRepository.createAlbum(folderName)
     }

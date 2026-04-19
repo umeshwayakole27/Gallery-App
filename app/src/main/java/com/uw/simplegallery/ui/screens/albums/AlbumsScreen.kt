@@ -27,13 +27,17 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -42,7 +46,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,12 +58,14 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.uw.simplegallery.R
 import com.uw.simplegallery.data.model.AlbumItem
 import com.uw.simplegallery.ui.selection.AlbumsSelectionBottomBar
 import com.uw.simplegallery.ui.selection.IsSelectingAlbumsTopBar
@@ -65,6 +73,7 @@ import com.uw.simplegallery.ui.selection.getAppBarContentTransition
 import com.uw.simplegallery.ui.selection.selectAlbum
 import com.uw.simplegallery.ui.selection.toggleAlbum
 import com.uw.simplegallery.ui.selection.unselectAlbum
+import com.uw.simplegallery.ui.search.matchesSearchQuery
 import com.uw.simplegallery.viewmodel.GalleryViewModel
 
 /**
@@ -99,6 +108,12 @@ fun AlbumsScreen(
     val albums by viewModel.albums.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
 
+    var isSearchMode by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+    val filteredAlbums by remember(albums, searchQuery) {
+        derivedStateOf { albums.filter { it.matchesSearchQuery(searchQuery) } }
+    }
+
     val gridState = rememberLazyGridState()
     val isSelecting by remember { derivedStateOf { selectedAlbumsList.isNotEmpty() } }
     val selectedAlbumIds by remember {
@@ -127,17 +142,54 @@ fun AlbumsScreen(
                 if (selecting) {
                     IsSelectingAlbumsTopBar(
                         selectedAlbumsList = selectedAlbumsList,
-                        allAlbums = albums,
+                        allAlbums = filteredAlbums,
                         onClearSelection = { selectedAlbumsList.clear() }
                     )
                 } else {
-                    TopAppBar(
-                        title = { Text("Albums") },
-                        colors = TopAppBarDefaults.topAppBarColors(
-                            containerColor = MaterialTheme.colorScheme.surface,
-                            titleContentColor = MaterialTheme.colorScheme.onSurface
+                    if (isSearchMode) {
+                        TopAppBar(
+                            title = {
+                                OutlinedTextField(
+                                    value = searchQuery,
+                                    onValueChange = { searchQuery = it },
+                                    singleLine = true,
+                                    label = { Text(stringResource(id = R.string.hint_search_albums)) },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            },
+                            actions = {
+                                IconButton(onClick = {
+                                    searchQuery = ""
+                                    isSearchMode = false
+                                }) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = stringResource(id = R.string.action_close_search)
+                                    )
+                                }
+                            },
+                            colors = TopAppBarDefaults.topAppBarColors(
+                                containerColor = MaterialTheme.colorScheme.surface,
+                                titleContentColor = MaterialTheme.colorScheme.onSurface
+                            )
                         )
-                    )
+                    } else {
+                        TopAppBar(
+                            title = { Text(stringResource(id = R.string.screen_albums_title)) },
+                            actions = {
+                                IconButton(onClick = { isSearchMode = true }) {
+                                    Icon(
+                                        imageVector = Icons.Default.Search,
+                                        contentDescription = stringResource(id = R.string.action_search_albums)
+                                    )
+                                }
+                            },
+                            colors = TopAppBarDefaults.topAppBarColors(
+                                containerColor = MaterialTheme.colorScheme.surface,
+                                titleContentColor = MaterialTheme.colorScheme.onSurface
+                            )
+                        )
+                    }
                 }
             }
         }
@@ -147,14 +199,18 @@ fun AlbumsScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            if (isLoading && albums.isEmpty()) {
+            if (isLoading && filteredAlbums.isEmpty()) {
                 CircularProgressIndicator(
                     modifier = Modifier.align(Alignment.Center)
                 )
-            } else if (albums.isEmpty()) {
+            } else if (filteredAlbums.isEmpty()) {
                 // Empty state
                 Text(
-                    text = "No albums found",
+                    text = if (searchQuery.isNotBlank()) {
+                        stringResource(id = R.string.msg_no_matching_albums)
+                    } else {
+                        stringResource(id = R.string.msg_no_albums_found)
+                    },
                     style = MaterialTheme.typography.headlineSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.align(Alignment.Center)
@@ -174,7 +230,7 @@ fun AlbumsScreen(
                     modifier = Modifier.fillMaxSize()
                 ) {
                     items(
-                        items = albums,
+                        items = filteredAlbums,
                         key = { it.id }
                     ) { album ->
                         val isItemSelected = album.id in selectedAlbumIds

@@ -62,4 +62,34 @@ interface MediaRepository {
      * @return true if successful
      */
     suspend fun renameMediaItem(id: Long, newName: String): Boolean
+
+    /**
+     * Returns all unique tags used across media items.
+     */
+    suspend fun getAllTags(): List<String>
+
+    /**
+     * Adds a tag to the given media item and returns the updated tag list.
+     */
+    suspend fun addTagToMedia(id: Long, tag: String): List<String>
+
+    /**
+     * Removes a tag from the given media item and returns the updated tag list.
+     */
+    suspend fun removeTagFromMedia(id: Long, tag: String): List<String>
+
+    /**
+     * Renames a tag across all media items.
+     */
+    suspend fun renameTagGlobally(oldTag: String, newTag: String): Boolean
+
+    /**
+     * Merges source tag into target tag across all media items.
+     */
+    suspend fun mergeTagsGlobally(sourceTag: String, targetTag: String): Boolean
+
+    /**
+     * Deletes a tag from all media items.
+     */
+    suspend fun deleteTagGlobally(tag: String): Boolean
 }

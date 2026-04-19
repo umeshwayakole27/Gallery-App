@@ -56,6 +56,7 @@ class GalleryViewModel @Inject constructor(
     val selectedMedia: StateFlow<MediaItem?> = stateCoordinator.selectedMedia
     val currentAlbumMedia: StateFlow<List<MediaItem>> = stateCoordinator.currentAlbumMedia
     val currentAlbumName: StateFlow<String?> = stateCoordinator.currentAlbumName
+    val allTags: StateFlow<List<String>> = stateCoordinator.allTags
 
     private var loadMediaJob: Job? = null
 
@@ -267,6 +268,77 @@ class GalleryViewModel @Inject constructor(
                 throw cancellation
             } catch (e: Exception) {
                 stateCoordinator.setError(e.message ?: "Error renaming media")
+            }
+        }
+    }
+
+    fun addTagToMedia(id: Long, tag: String) {
+        viewModelScope.launch {
+            try {
+                val updatedTags = mediaCoordinator.addTagToMedia(id, tag)
+                stateCoordinator.updateMediaTags(id, updatedTags)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (e: Exception) {
+                stateCoordinator.setError(e.message ?: "Failed to add tag")
+            }
+        }
+    }
+
+    fun removeTagFromMedia(id: Long, tag: String) {
+        viewModelScope.launch {
+            try {
+                val updatedTags = mediaCoordinator.removeTagFromMedia(id, tag)
+                stateCoordinator.updateMediaTags(id, updatedTags)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (e: Exception) {
+                stateCoordinator.setError(e.message ?: "Failed to remove tag")
+            }
+        }
+    }
+
+    fun renameTagGlobally(oldTag: String, newTag: String) {
+        viewModelScope.launch {
+            try {
+                val success = mediaCoordinator.renameTagGlobally(oldTag, newTag)
+                if (success) {
+                    requestMediaRefresh(forceRefresh = false)
+                }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (e: Exception) {
+                stateCoordinator.setError(e.message)
+            }
+        }
+    }
+
+    fun mergeTagsGlobally(sourceTag: String, targetTag: String) {
+        viewModelScope.launch {
+            try {
+                val success = mediaCoordinator.mergeTagsGlobally(sourceTag, targetTag)
+                if (success) {
+                    requestMediaRefresh(forceRefresh = false)
+                }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (e: Exception) {
+                stateCoordinator.setError(e.message)
+            }
+        }
+    }
+
+    fun deleteTagGlobally(tag: String) {
+        viewModelScope.launch {
+            try {
+                val success = mediaCoordinator.deleteTagGlobally(tag)
+                if (success) {
+                    requestMediaRefresh(forceRefresh = false)
+                }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (e: Exception) {
+                stateCoordinator.setError(e.message)
             }
         }
     }

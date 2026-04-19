@@ -42,6 +42,7 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -50,6 +51,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -89,6 +91,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -112,6 +115,7 @@ import com.uw.simplegallery.ui.selection.selectItem
 import com.uw.simplegallery.ui.selection.toggleItem
 import com.uw.simplegallery.ui.selection.unselectAll
 import com.uw.simplegallery.ui.selection.unselectItem
+import com.uw.simplegallery.ui.search.matchesSearchQuery
 import com.uw.simplegallery.viewmodel.GalleryViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -170,7 +174,15 @@ fun GalleryGridScreen(
     val albumName by viewModel.currentAlbumName.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
-    val timelineUiModel = remember(images) { buildTimelineUiModel(images) }
+
+    var isSearchMode by rememberSaveable(albumId) { mutableStateOf(false) }
+    var searchQuery by rememberSaveable(albumId) { mutableStateOf("") }
+    val filteredImages by remember(images, searchQuery) {
+        derivedStateOf {
+            images.filter { it.matchesSearchQuery(searchQuery) }
+        }
+    }
+    val timelineUiModel = remember(filteredImages) { buildTimelineUiModel(filteredImages) }
 
     val snackbarHostState = remember { SnackbarHostState() }
     val isSelecting by remember { derivedStateOf { selectedItemsList.isNotEmpty() } }
@@ -232,7 +244,16 @@ fun GalleryGridScreen(
         }
     }
 
-    val title = if (isAlbumMode) albumName ?: "Album" else "Gallery"
+    val title = if (isAlbumMode) {
+        albumName ?: stringResource(id = R.string.screen_album_fallback_title)
+    } else {
+        stringResource(id = R.string.screen_gallery_title)
+    }
+    val searchHint = if (isAlbumMode) {
+        stringResource(id = R.string.hint_search_in_album)
+    } else {
+        stringResource(id = R.string.hint_search_media)
+    }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -246,37 +267,76 @@ fun GalleryGridScreen(
                 if (selecting) {
                     IsSelectingTopBar(
                         selectedItemsList = selectedItemsList,
-                        allItems = images,
+                        allItems = filteredImages,
                         onClearSelection = { selectedItemsList.clear() }
                     )
                 } else {
-                    TopAppBar(
-                        title = { Text(title) },
-                        navigationIcon = {
-                            if (isAlbumMode && onNavigateBack != null) {
-                                IconButton(onClick = onNavigateBack) {
+                    if (isSearchMode) {
+                        TopAppBar(
+                            title = {
+                                OutlinedTextField(
+                                    value = searchQuery,
+                                    onValueChange = { searchQuery = it },
+                                    singleLine = true,
+                                    placeholder = { Text(searchHint) },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            },
+                            navigationIcon = {
+                                if (isAlbumMode && onNavigateBack != null) {
+                                    IconButton(onClick = onNavigateBack) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                            contentDescription = "Navigate back"
+                                        )
+                                    }
+                                }
+                            },
+                            actions = {
+                                IconButton(
+                                    onClick = {
+                                        searchQuery = ""
+                                        isSearchMode = false
+                                    }
+                                ) {
                                     Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                        contentDescription = "Navigate back"
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = stringResource(id = R.string.action_close_search)
                                     )
                                 }
-                            }
-                        },
-                        colors = TopAppBarDefaults.topAppBarColors(
-                            containerColor = MaterialTheme.colorScheme.surface,
-                            titleContentColor = MaterialTheme.colorScheme.onSurface
-                        ),
-                        actions = {
-                            if (!isAlbumMode) {
-                                IconButton(onClick = { /* TODO: Open search */ }) {
+                            },
+                            colors = TopAppBarDefaults.topAppBarColors(
+                                containerColor = MaterialTheme.colorScheme.surface,
+                                titleContentColor = MaterialTheme.colorScheme.onSurface
+                            )
+                        )
+                    } else {
+                        TopAppBar(
+                            title = { Text(title) },
+                            navigationIcon = {
+                                if (isAlbumMode && onNavigateBack != null) {
+                                    IconButton(onClick = onNavigateBack) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                            contentDescription = "Navigate back"
+                                        )
+                                    }
+                                }
+                            },
+                            colors = TopAppBarDefaults.topAppBarColors(
+                                containerColor = MaterialTheme.colorScheme.surface,
+                                titleContentColor = MaterialTheme.colorScheme.onSurface
+                            ),
+                            actions = {
+                                IconButton(onClick = { isSearchMode = true }) {
                                     Icon(
                                         imageVector = Icons.Default.Search,
-                                        contentDescription = "Search images"
+                                        contentDescription = stringResource(id = R.string.action_search_images)
                                     )
                                 }
                             }
-                        }
-                    )
+                        )
+                    }
                 }
             }
         }
@@ -286,14 +346,15 @@ fun GalleryGridScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            if (isLoading && images.isEmpty()) {
+            if (isLoading && filteredImages.isEmpty()) {
                 CircularProgressIndicator(
                     modifier = Modifier.align(Alignment.Center)
                 )
-            } else if (images.isEmpty()) {
+            } else if (filteredImages.isEmpty()) {
                 EmptyGalleryState(
                     modifier = Modifier.align(Alignment.Center),
-                    isAlbumMode = isAlbumMode
+                    isAlbumMode = isAlbumMode,
+                    isSearchActive = searchQuery.isNotBlank()
                 )
             } else {
                 BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -358,7 +419,7 @@ fun GalleryGridScreen(
                             .dragSelectionHandler(
                                 state = gridState,
                                 selectedItemsList = selectedItemsList,
-                                allItems = images,
+                                allItems = filteredImages,
                                 numberOfColumns = effectiveColumnCount,
                                 scrollSpeed = scrollSpeed,
                                 scrollThreshold = with(localDensity) { 40.dp.toPx() },
@@ -880,7 +941,8 @@ private fun LazyGridState.getGridItemIndex(
 @Composable
 private fun EmptyGalleryState(
     modifier: Modifier = Modifier,
-    isAlbumMode: Boolean = false
+    isAlbumMode: Boolean = false,
+    isSearchActive: Boolean = false
 ) {
     Column(
         modifier = modifier.padding(32.dp),
@@ -888,13 +950,21 @@ private fun EmptyGalleryState(
         verticalArrangement = Arrangement.Center
     ) {
         Text(
-            text = if (isAlbumMode) "No images in this album" else "No images found",
+            text = when {
+                isSearchActive && isAlbumMode -> stringResource(id = R.string.msg_no_matches_in_album)
+                isSearchActive -> stringResource(id = R.string.msg_no_matching_media)
+                isAlbumMode -> stringResource(id = R.string.msg_no_images_in_album)
+                else -> stringResource(id = R.string.msg_no_images_found)
+            },
             style = MaterialTheme.typography.headlineSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Text(
-            text = if (isAlbumMode) "Photos added to this album will appear here"
-            else "Your photos and videos will appear here",
+            text = when {
+                isSearchActive -> stringResource(id = R.string.msg_try_search_metadata)
+                isAlbumMode -> stringResource(id = R.string.msg_photos_in_album_will_appear)
+                else -> stringResource(id = R.string.msg_photos_videos_will_appear)
+            },
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 8.dp)

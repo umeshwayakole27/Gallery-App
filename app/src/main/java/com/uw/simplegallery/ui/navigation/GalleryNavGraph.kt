@@ -13,8 +13,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Photo
 import androidx.compose.material.icons.filled.PhotoAlbum
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.Photo
 import androidx.compose.material.icons.outlined.PhotoAlbum
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
@@ -33,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -43,6 +46,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.uw.simplegallery.R
 import com.uw.simplegallery.data.model.AlbumItem
 import com.uw.simplegallery.data.model.MediaItem
 import com.uw.simplegallery.ui.components.FloatingBottomNavBar
@@ -51,6 +55,8 @@ import com.uw.simplegallery.ui.components.floatingNavBarTotalHeight
 import com.uw.simplegallery.ui.screens.albums.AlbumsScreen
 import com.uw.simplegallery.ui.screens.detail.ImageDetailScreen
 import com.uw.simplegallery.ui.screens.gallery.GalleryGridScreen
+import com.uw.simplegallery.ui.screens.search.SearchTagsScreen
+import com.uw.simplegallery.ui.screens.search.TagManagerScreen
 import com.uw.simplegallery.viewmodel.GalleryViewModel
 import java.net.URLDecoder
 import java.net.URLEncoder
@@ -63,6 +69,8 @@ object GalleryRoutes {
     const val GALLERY_GRID = "gallery_grid"
     const val IMAGE_DETAIL = "image_detail/{imageId}"
     const val ALBUMS = "albums"
+    const val SEARCH_TAGS = "search_tags"
+    const val TAG_MANAGER = "tag_manager"
     const val ALBUM_DETAIL = "album_detail/{albumId}"
 
     /** Builds the image detail route for a specific image ID. */
@@ -85,37 +93,34 @@ object GalleryRoutes {
  */
 sealed class BottomNavTab(
     val route: String,
-    val label: String,
     val selectedIcon: ImageVector,
     val unselectedIcon: ImageVector
 ) {
     data object Gallery : BottomNavTab(
         route = GalleryRoutes.GALLERY_GRID,
-        label = "Gallery",
         selectedIcon = Icons.Filled.Photo,
         unselectedIcon = Icons.Outlined.Photo
     )
 
     data object Albums : BottomNavTab(
         route = GalleryRoutes.ALBUMS,
-        label = "Albums",
         selectedIcon = Icons.Filled.PhotoAlbum,
         unselectedIcon = Icons.Outlined.PhotoAlbum
     )
-}
 
-/** All bottom navigation tabs as [FloatingNavTab] instances for the floating bar. */
-private val floatingNavTabs = listOf(BottomNavTab.Gallery, BottomNavTab.Albums).map { tab ->
-    FloatingNavTab(
-        route = tab.route,
-        label = tab.label,
-        selectedIcon = tab.selectedIcon,
-        unselectedIcon = tab.unselectedIcon
+    data object SearchTags : BottomNavTab(
+        route = GalleryRoutes.SEARCH_TAGS,
+        selectedIcon = Icons.Filled.Search,
+        unselectedIcon = Icons.Outlined.Search
     )
 }
 
 /** Routes that should show the bottom navigation bar. */
-private val bottomNavRoutes = listOf(BottomNavTab.Gallery, BottomNavTab.Albums).map { it.route }
+private val bottomNavRoutes = listOf(
+    BottomNavTab.Gallery,
+    BottomNavTab.Albums,
+    BottomNavTab.SearchTags
+).map { it.route }
 
 /**
  * Main navigation graph for the Gallery app.
@@ -183,6 +188,27 @@ fun GalleryNavGraph() {
     // Total height of the floating nav bar for offsetting content and FAB
     val navBarHeight = floatingNavBarTotalHeight()
 
+    val floatingNavTabs = listOf(
+        FloatingNavTab(
+            route = BottomNavTab.Gallery.route,
+            label = stringResource(id = R.string.nav_gallery),
+            selectedIcon = BottomNavTab.Gallery.selectedIcon,
+            unselectedIcon = BottomNavTab.Gallery.unselectedIcon
+        ),
+        FloatingNavTab(
+            route = BottomNavTab.Albums.route,
+            label = stringResource(id = R.string.nav_albums),
+            selectedIcon = BottomNavTab.Albums.selectedIcon,
+            unselectedIcon = BottomNavTab.Albums.unselectedIcon
+        ),
+        FloatingNavTab(
+            route = BottomNavTab.SearchTags.route,
+            label = stringResource(id = R.string.nav_search_tags),
+            selectedIcon = BottomNavTab.SearchTags.selectedIcon,
+            unselectedIcon = BottomNavTab.SearchTags.unselectedIcon
+        )
+    )
+
     // FAB state — managed here so the FAB lives in the overlay layer above the nav bar
     var showCreateAlbumDialog by remember { mutableStateOf(false) }
     var albumsScrolledDown by remember { mutableStateOf(false) }
@@ -234,6 +260,28 @@ fun GalleryNavGraph() {
                     onScrolledDown = { scrolledDown ->
                         albumsScrolledDown = scrolledDown
                     }
+                )
+            }
+
+            composable(GalleryRoutes.SEARCH_TAGS) {
+                SearchTagsScreen(
+                    viewModel = viewModel,
+                    onImageClick = { imageId ->
+                        navController.navigate(GalleryRoutes.imageDetail(imageId))
+                    },
+                    onAlbumClick = { albumId ->
+                        navController.navigate(GalleryRoutes.albumDetail(albumId))
+                    },
+                    onOpenTagManager = { navController.navigate(GalleryRoutes.TAG_MANAGER) },
+                    extraBottomPadding = navBarHeight
+                )
+            }
+
+            composable(GalleryRoutes.TAG_MANAGER) {
+                TagManagerScreen(
+                    viewModel = viewModel,
+                    onNavigateBack = { navController.popBackStack() },
+                    extraBottomPadding = navBarHeight
                 )
             }
 
